@@ -151,6 +151,14 @@
   button {
     cursor: pointer;
   }
+
+  nextjs-portal [data-nextjs-dev-tools-button],
+  nextjs-portal [data-nextjs-devtools-button],
+  nextjs-portal [data-nextjs-dev-indicator],
+  nextjs-portal [data-nextjs-build-activity],
+  nextjs-portal [aria-label="Open Next.js Dev Tools"] {
+    display: none !important;
+  }
 }
 
 @keyframes duck-quack {

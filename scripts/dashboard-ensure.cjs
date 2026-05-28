@@ -141,12 +141,17 @@ function isSameDashboard(health) {
 }
 
 function wantsDevMode() {
-  return process.env.VIBE_DASHBOARD_DEV === "1";
+  return (
+    process.env.VIBE_DASHBOARD_PROD !== "1" &&
+    process.env.VIBE_DASHBOARD_DEV !== "0"
+  );
 }
 
 function isReusableDashboard(health) {
   if (!isSameDashboard(health)) return false;
-  return wantsDevMode() || health.json?.mode !== "development";
+  return wantsDevMode()
+    ? health.json?.mode === "development"
+    : health.json?.mode !== "development";
 }
 
 function runPowerShell(script) {
@@ -197,6 +202,13 @@ function stopProcessTree(pid) {
   } catch {
     // already gone
   }
+}
+
+function statePidForPort(port) {
+  const state = readState();
+  if (Number(state?.port) !== port) return null;
+  const pid = Number(state?.pid);
+  return Number.isFinite(pid) && pid > 0 ? pid : null;
 }
 
 function writeState(port, pid, reused) {
@@ -302,6 +314,20 @@ async function chooseDashboard() {
     const occupied = health.reachable || (await isPortOpen(port));
 
     if (occupied) {
+      if (isSameDashboard(health) && !isReusableDashboard(health)) {
+        const ownerPid = getPortOwnerPid(port);
+        const launcherPid = statePidForPort(port);
+        const stalePid = ownerPid || launcherPid;
+        if (stalePid) {
+          log(`port ${port} has project dashboard in the wrong mode; stopping pid=${stalePid}`);
+          stopProcessTree(stalePid);
+          if (launcherPid && launcherPid !== stalePid) stopProcessTree(launcherPid);
+          await sleep(1_200);
+          port -= 1;
+          continue;
+        }
+      }
+
       const pid = getPortOwnerPid(port);
       if (pid && isDashboardProcess(pid)) {
         log(`port ${port} has a stale project dashboard; stopping pid=${pid}`);

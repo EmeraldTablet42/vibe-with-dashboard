@@ -20,13 +20,17 @@ A read-only snapshot of a completed board. Archived boards preserve Plan, Kanban
 
 A concise phase-level record written by an LLM agent or launcher. Activity entries describe start, plan, implement, verify, result, or fail states.
 
+## Progress Pipeline
+
+The data path for live progress: agent CLI command, dashboard REST API, SQLite state, SSE snapshot event, then React re-render. Progress updates do not require dashboard source-code edits.
+
 ## Inspector
 
 A folded project snapshot panel for repo, GitHub, design token, harness, skill, MCP, and agent information.
 
 ## Locale
 
-The browser-preferred UI language. The shell supports English and Korean, falls back to English text for unsupported languages, and can display agent-supplied translations for Plan and Kanban items.
+The browser-preferred UI language. The shell supports English and Korean, falls back to English text for unsupported languages, and shows Plan/Kanban content in native locale by default with an English toggle.
 
 ## Rubber Duck
 

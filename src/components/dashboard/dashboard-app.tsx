@@ -13,6 +13,7 @@ import {
   GitBranch,
   GitPullRequest,
   GripVertical,
+  Languages,
   LayoutDashboard,
   ListChecks,
   Minimize2,
@@ -23,6 +24,7 @@ import {
   Settings2,
   Sparkles,
   SquareKanban,
+  Trash2,
   Workflow,
 } from "lucide-react";
 import {
@@ -34,6 +36,17 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 
 import { ThemeToggle } from "@/components/theme-toggle";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -66,11 +79,17 @@ import type {
 } from "@/lib/dashboard-types";
 import {
   dashboardMessages,
+  resolveContentLocale,
   resolveLocale,
   type DashboardMessages,
-  type SupportedLocale,
 } from "@/lib/i18n";
-import type { CardPriority, CardStatus, LocaleTranslations } from "@/lib/types";
+import { pickLocalizedText as localizedText } from "@/lib/localized-text";
+import type {
+  CardPriority,
+  CardStatus,
+  GoalStatus,
+  MilestoneStatus,
+} from "@/lib/types";
 
 const DEFAULT_PLAN_WIDTH = 360;
 const MIN_PLAN_WIDTH = 280;
@@ -78,7 +97,14 @@ const MAX_PLAN_WIDTH = 560;
 
 const statuses: CardStatus[] = ["backlog", "ready", "doing", "review", "done"];
 const priorities: CardPriority[] = ["high", "medium", "low"];
-const phases = ["start", "plan", "implement", "verify", "result"] as const;
+
+const statusProgressWeight: Record<CardStatus, number> = {
+  backlog: 0,
+  ready: 0.15,
+  doing: 0.45,
+  review: 0.75,
+  done: 1,
+};
 
 const statusTone: Record<CardStatus, string> = {
   backlog: "bg-muted/20",
@@ -110,6 +136,40 @@ const priorityBadgeClass: Record<CardPriority, string> = {
     "border-teal-700/70 bg-teal-100 text-teal-950 dark:border-teal-300/70 dark:bg-teal-300 dark:text-teal-950",
 };
 
+const goalStatusBadgeClass: Record<GoalStatus, string> = {
+  active:
+    "border-cyan-700/70 bg-cyan-100 text-cyan-950 dark:border-cyan-300/70 dark:bg-cyan-400 dark:text-cyan-950",
+  paused:
+    "border-zinc-500/70 bg-zinc-100 text-zinc-900 dark:border-zinc-400/60 dark:bg-zinc-700 dark:text-zinc-50",
+  complete:
+    "border-emerald-700/70 bg-emerald-100 text-emerald-950 dark:border-emerald-300/70 dark:bg-emerald-400 dark:text-emerald-950",
+};
+
+const milestoneStatusBadgeClass: Record<MilestoneStatus, string> = {
+  planned:
+    "border-indigo-600/70 bg-indigo-100 text-indigo-950 dark:border-indigo-300/70 dark:bg-indigo-400 dark:text-indigo-950",
+  active:
+    "border-violet-600/70 bg-violet-100 text-violet-950 dark:border-violet-300/70 dark:bg-violet-400 dark:text-violet-950",
+  complete:
+    "border-emerald-700/70 bg-emerald-100 text-emerald-950 dark:border-emerald-300/70 dark:bg-emerald-400 dark:text-emerald-950",
+};
+
+const planCardAccentClass: Record<CardStatus, string> = {
+  backlog: "border-l-zinc-400 bg-zinc-50/40 dark:bg-zinc-900/20",
+  ready: "border-l-sky-500 bg-sky-50/50 dark:bg-sky-950/20",
+  doing: "border-l-amber-500 bg-amber-50/50 dark:bg-amber-950/20",
+  review: "border-l-violet-500 bg-violet-50/50 dark:bg-violet-950/20",
+  done: "border-l-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/20",
+};
+
+const planCardDotClass: Record<CardStatus, string> = {
+  backlog: "text-zinc-500",
+  ready: "text-sky-600",
+  doing: "text-amber-600",
+  review: "text-violet-600",
+  done: "text-emerald-600",
+};
+
 type ArchiveRecord = DashboardSnapshot["archives"][number];
 type DuckSuggestion = DashboardSnapshot["duckSuggestions"][number];
 type ArchiveGoal = Omit<DashboardSnapshot["goals"][number], "milestones"> & {
@@ -133,18 +193,23 @@ type ArchivedSnapshot = {
 };
 
 function useLocale() {
-  const [locale] = React.useState<SupportedLocale>(() =>
-    typeof navigator === "undefined" ? "en" : resolveLocale(navigator.languages)
-  );
+  const [locales] = React.useState(() => {
+    const languages = typeof navigator === "undefined" ? [] : navigator.languages;
+    return {
+      shell: resolveLocale(languages),
+      content: resolveContentLocale(languages),
+    };
+  });
 
   return {
-    locale,
-    messages: dashboardMessages[locale],
+    locale: locales.shell,
+    contentLocale: locales.content,
+    messages: dashboardMessages[locales.shell],
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
   };
 }
 
-function formatTime(value: string, locale: SupportedLocale, timeZone: string) {
+function formatTime(value: string, locale: string, timeZone: string) {
   return new Intl.DateTimeFormat(locale, {
     timeZone,
     hour: "2-digit",
@@ -157,18 +222,6 @@ function readArchiveSnapshot(archive?: ArchiveRecord): ArchivedSnapshot {
   return (archive?.snapshot ?? {}) as ArchivedSnapshot;
 }
 
-function localizedText(
-  entity: {
-    translations?: LocaleTranslations;
-  },
-  locale: SupportedLocale,
-  field: keyof LocaleTranslations[string],
-  fallback = ""
-) {
-  const translated = entity.translations?.[locale]?.[field];
-  return translated?.trim() || fallback;
-}
-
 function StatusBadge({
   messages,
   status,
@@ -177,7 +230,11 @@ function StatusBadge({
   status: CardStatus;
 }) {
   return (
-    <Badge variant="outline" className={`font-semibold ${statusBadgeClass[status]}`}>
+    <Badge
+      variant="outline"
+      data-status-badge={status}
+      className={`font-semibold ${statusBadgeClass[status]}`}
+    >
       {messages.status[status]}
     </Badge>
   );
@@ -199,9 +256,46 @@ function PriorityBadge({
   return (
     <Badge
       variant="outline"
+      data-priority-badge={priority}
       className={`font-semibold ${priorityBadgeClass[priority]}`}
     >
       {label}
+    </Badge>
+  );
+}
+
+function GoalStatusBadge({
+  messages,
+  status,
+}: {
+  messages: DashboardMessages;
+  status: GoalStatus;
+}) {
+  return (
+    <Badge
+      variant="outline"
+      data-goal-status-badge={status}
+      className={`font-semibold ${goalStatusBadgeClass[status]}`}
+    >
+      {messages.goalStatus[status]}
+    </Badge>
+  );
+}
+
+function MilestoneStatusBadge({
+  messages,
+  status,
+}: {
+  messages: DashboardMessages;
+  status: MilestoneStatus;
+}) {
+  return (
+    <Badge
+      variant="outline"
+      data-milestone-status-badge={status}
+      className={`font-semibold ${milestoneStatusBadgeClass[status]}`}
+    >
+      {messages.milestoneStatus[status]}
     </Badge>
   );
 }
@@ -237,19 +331,32 @@ async function patchJson<T>(url: string, body: unknown): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+async function deleteJson<T>(url: string): Promise<T> {
+  const response = await fetch(url, { method: "DELETE" });
+  if (!response.ok) throw new Error(await response.text());
+  return response.json() as Promise<T>;
+}
+
 export function DashboardApp({
   initialSnapshot,
 }: {
   initialSnapshot: DashboardSnapshot;
 }) {
-  const { locale, messages: m, timeZone } = useLocale();
+  const { locale, contentLocale: nativeContentLocale, messages: m, timeZone } = useLocale();
   const [snapshot, setSnapshot] = React.useState(initialSnapshot);
   const [mainTab, setMainTab] = React.useState("active");
+  const [contentLocaleMode, setContentLocaleMode] = React.useState<"native" | "english">(
+    "native"
+  );
   const [planOpen, setPlanOpen] = React.useState(true);
   const [planWidth, setPlanWidth] = React.useState(DEFAULT_PLAN_WIDTH);
   const [selectedArchiveId, setSelectedArchiveId] = React.useState(
     initialSnapshot.archives[0]?.id ?? ""
   );
+  const contentLocale =
+    contentLocaleMode === "english" ? "en" : nativeContentLocale || locale;
+
+  React.useEffect(() => hideNextDevIndicator(), []);
 
   const refresh = React.useCallback(async () => {
     const response = await fetch("/api/dashboard/snapshot", {
@@ -342,6 +449,11 @@ export function DashboardApp({
           </TabsList>
 
           <div className="ml-auto flex items-center gap-2">
+            <ContentLanguageToggle
+              messages={m}
+              mode={contentLocaleMode}
+              onModeChange={setContentLocaleMode}
+            />
             {!planOpen && mainTab === "active" && (
               <IconTip label={m.openPlan}>
                 <Button
@@ -371,7 +483,7 @@ export function DashboardApp({
               activities={snapshot.activityEntries}
               cards={snapshot.cards}
               doingCount={doingCards.length}
-              locale={locale}
+              locale={contentLocale}
               messages={m}
               timeZone={timeZone}
             />
@@ -382,7 +494,7 @@ export function DashboardApp({
         <TabsContent value="active" className="m-0 min-h-0 flex-1">
           <ActiveBoard
             handleDragEnd={handleDragEnd}
-            locale={locale}
+            locale={contentLocale}
             messages={m}
             planOpen={planOpen}
             planWidth={planWidth}
@@ -395,8 +507,9 @@ export function DashboardApp({
         <TabsContent value="archive" className="m-0 min-h-0 flex-1">
           <ArchiveBoard
             archives={snapshot.archives}
-            locale={locale}
+            locale={contentLocale}
             messages={m}
+            onRefresh={refresh}
             selectedArchiveId={selectedArchiveId}
             setSelectedArchiveId={setSelectedArchiveId}
             timeZone={timeZone}
@@ -404,12 +517,89 @@ export function DashboardApp({
         </TabsContent>
       </Tabs>
       <RubberDuck
-        locale={locale}
+        locale={contentLocale}
         messages={m}
         onRefresh={refresh}
         suggestions={snapshot.duckSuggestions}
       />
     </main>
+  );
+}
+
+function hideNextDevIndicator() {
+  if (typeof document === "undefined") return undefined;
+
+  if (process.env.NODE_ENV === "development") {
+    fetch("/__nextjs_disable_dev_indicator", { method: "POST" }).catch(() => {
+      // The endpoint exists only in Next development mode.
+    });
+  }
+
+  const inject = () => {
+    for (const portal of Array.from(document.querySelectorAll("nextjs-portal"))) {
+      const shadowRoot = (portal as HTMLElement).shadowRoot;
+      if (!shadowRoot || shadowRoot.getElementById("vibe-hide-next-dev-indicator")) {
+        continue;
+      }
+
+      const style = document.createElement("style");
+      style.id = "vibe-hide-next-dev-indicator";
+      style.textContent = `
+        .dev-tools-indicator-menu,
+        .dev-tools-indicator-inner,
+        [data-nextjs-toast],
+        #data-devtools-indicator,
+        [data-nextjs-route-type],
+        [data-segment-explorer],
+        [data-preferences] {
+          display: none !important;
+        }
+      `;
+      shadowRoot.appendChild(style);
+    }
+  };
+
+  inject();
+  const observer = new MutationObserver(inject);
+  observer.observe(document.body, { childList: true, subtree: true });
+  return () => observer.disconnect();
+}
+
+function ContentLanguageToggle({
+  messages,
+  mode,
+  onModeChange,
+}: {
+  messages: DashboardMessages;
+  mode: "native" | "english";
+  onModeChange: (mode: "native" | "english") => void;
+}) {
+  return (
+    <div
+      aria-label={messages.contentLanguage}
+      className="hidden items-center gap-1 rounded-lg border border-border bg-background p-1 md:flex"
+      role="group"
+    >
+      <Languages className="ml-1 size-3.5 text-muted-foreground" />
+      <Button
+        type="button"
+        size="xs"
+        variant={mode === "native" ? "secondary" : "ghost"}
+        onClick={() => onModeChange("native")}
+        aria-pressed={mode === "native"}
+      >
+        {messages.nativeLanguage}
+      </Button>
+      <Button
+        type="button"
+        size="xs"
+        variant={mode === "english" ? "secondary" : "ghost"}
+        onClick={() => onModeChange("english")}
+        aria-pressed={mode === "english"}
+      >
+        {messages.englishLanguage}
+      </Button>
+    </div>
   );
 }
 
@@ -424,7 +614,7 @@ function ActiveBoard({
   startPlanResize,
 }: {
   handleDragEnd: (event: DragEndEvent) => Promise<void>;
-  locale: SupportedLocale;
+  locale: string;
   messages: DashboardMessages;
   planOpen: boolean;
   planWidth: number;
@@ -455,7 +645,13 @@ function ActiveBoard({
               </IconTip>
             }
             icon={<Workflow className="size-4" />}
-            meta={snapshot.board.isEmpty ? messages.empty : snapshot.board.status}
+            meta={
+              snapshot.board.isEmpty
+                ? messages.empty
+                : snapshot.board.archiveReady
+                  ? messages.archiveReady
+                  : messages.goalStatus.active
+            }
             title={messages.plan}
           />
           <ScrollArea className="h-[calc(100vh-7.5rem)]">
@@ -515,17 +711,22 @@ function ArchiveBoard({
   archives,
   locale,
   messages,
+  onRefresh,
   selectedArchiveId,
   setSelectedArchiveId,
   timeZone,
 }: {
   archives: ArchiveRecord[];
-  locale: SupportedLocale;
+  locale: string;
   messages: DashboardMessages;
+  onRefresh: () => Promise<void>;
   selectedArchiveId: string;
   setSelectedArchiveId: (id: string) => void;
   timeZone: string;
 }) {
+  const [selectedSuggestion, setSelectedSuggestion] =
+    React.useState<DuckSuggestion | null>(null);
+
   if (archives.length === 0) {
     return (
       <div className="flex h-[calc(100vh-3.5rem)] items-center justify-center text-sm text-muted-foreground">
@@ -538,7 +739,25 @@ function ArchiveBoard({
   const snapshot = readArchiveSnapshot(selected);
   const cards = snapshot.cards ?? [];
   const activities = snapshot.activityEntries ?? [];
+  const archiveSuggestions = snapshot.duckSuggestions ?? [];
   const archiveGoals = normalizeArchiveGoals(snapshot);
+
+  async function handleDeleteArchive(id: string) {
+    await deleteJson(`/api/dashboard/archive/${id}`);
+    setSelectedArchiveId(archives.find((archive) => archive.id !== id)?.id ?? "");
+    await onRefresh();
+  }
+
+  async function handleClearArchives() {
+    await deleteJson("/api/dashboard/archive");
+    setSelectedArchiveId("");
+    await onRefresh();
+  }
+
+  function selectArchive(id: string) {
+    setSelectedSuggestion(null);
+    setSelectedArchiveId(id);
+  }
 
   return (
     <div className="grid h-[calc(100vh-3.5rem)] grid-cols-[20rem_1fr]">
@@ -557,7 +776,8 @@ function ArchiveBoard({
                 key={archive.id}
                 locale={locale}
                 messages={messages}
-                onSelect={() => setSelectedArchiveId(archive.id)}
+                onDelete={() => handleDeleteArchive(archive.id)}
+                onSelect={() => selectArchive(archive.id)}
                 timeZone={timeZone}
               />
             ))}
@@ -591,7 +811,35 @@ function ArchiveBoard({
                     : selected.task || messages.archived}
                 </p>
               </div>
-              <Badge variant="secondary">{messages.archived}</Badge>
+              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                <Badge variant="secondary">{messages.archived}</Badge>
+                <ConfirmAction
+                  actionLabel={messages.delete}
+                  cancelLabel={messages.cancel}
+                  description={messages.archiveDeleteDescription}
+                  onConfirm={() => handleDeleteArchive(selected.id)}
+                  title={messages.confirmDeleteArchive}
+                  trigger={
+                    <Button type="button" variant="destructive" size="sm">
+                      <Trash2 className="size-3.5" />
+                      {messages.deleteArchive}
+                    </Button>
+                  }
+                />
+                <ConfirmAction
+                  actionLabel={messages.clear}
+                  cancelLabel={messages.cancel}
+                  description={messages.archiveClearDescription}
+                  onConfirm={handleClearArchives}
+                  title={messages.confirmClearArchives}
+                  trigger={
+                    <Button type="button" variant="destructive" size="sm">
+                      <Trash2 className="size-3.5" />
+                      {messages.clearArchives}
+                    </Button>
+                  }
+                />
+              </div>
             </div>
           </section>
 
@@ -604,6 +852,13 @@ function ArchiveBoard({
               readOnly
             />
           </div>
+
+          <ArchiveSuggestions
+            locale={locale}
+            messages={messages}
+            onSelect={setSelectedSuggestion}
+            suggestions={archiveSuggestions}
+          />
 
           <section className="rounded-md border border-border p-3">
             <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
@@ -619,6 +874,12 @@ function ArchiveBoard({
           </section>
         </div>
       </ScrollArea>
+      <SuggestionDialog
+        locale={locale}
+        messages={messages}
+        onOpenChange={(open) => !open && setSelectedSuggestion(null)}
+        selected={selectedSuggestion}
+      />
     </div>
   );
 }
@@ -628,13 +889,15 @@ function ArchiveListItem({
   isSelected,
   locale,
   messages,
+  onDelete,
   onSelect,
   timeZone,
 }: {
   archive: ArchiveRecord;
   isSelected: boolean;
-  locale: SupportedLocale;
+  locale: string;
   messages: DashboardMessages;
+  onDelete: () => Promise<void>;
   onSelect: () => void;
   timeZone: string;
 }) {
@@ -647,23 +910,76 @@ function ArchiveListItem({
     : archive.task;
 
   return (
-    <button
-      type="button"
-      onClick={onSelect}
+    <div
       className={`w-full rounded-md border p-3 text-left transition-colors ${
         isSelected
           ? "border-accent-cyan bg-accent-cyan/10"
           : "border-border bg-background hover:bg-muted/20"
       }`}
     >
-      <div className="truncate text-sm font-medium">{title}</div>
-      <div className="mt-1 truncate text-xs text-muted-foreground">
-        {task || messages.archived}
+      <div className="flex items-start gap-2">
+        <button type="button" onClick={onSelect} className="min-w-0 flex-1 text-left">
+          <div className="truncate text-sm font-medium">{title}</div>
+          <div className="mt-1 truncate text-xs text-muted-foreground">
+            {task || messages.archived}
+          </div>
+          <div className="mt-2 font-mono text-[10px] text-muted-foreground">
+            {formatTime(archive.createdAt, locale, timeZone)}
+          </div>
+        </button>
+        <ConfirmAction
+          actionLabel={messages.delete}
+          cancelLabel={messages.cancel}
+          description={messages.archiveDeleteDescription}
+          onConfirm={onDelete}
+          title={messages.confirmDeleteArchive}
+          trigger={
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label={messages.deleteArchive}
+            >
+              <Trash2 className="size-3" />
+            </Button>
+          }
+        />
       </div>
-      <div className="mt-2 font-mono text-[10px] text-muted-foreground">
-        {formatTime(archive.createdAt, locale, timeZone)}
-      </div>
-    </button>
+    </div>
+  );
+}
+
+function ConfirmAction({
+  actionLabel,
+  cancelLabel,
+  description,
+  onConfirm,
+  title,
+  trigger,
+}: {
+  actionLabel: string;
+  cancelLabel: string;
+  description: string;
+  onConfirm: () => void | Promise<void>;
+  title: string;
+  trigger: React.ReactElement;
+}) {
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger render={trigger} />
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
+          <AlertDialogDescription>{description}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{cancelLabel}</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" onClick={onConfirm}>
+            {actionLabel}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 
@@ -695,7 +1011,7 @@ function PlanPanel({
   messages,
   snapshot,
 }: {
-  locale: SupportedLocale;
+  locale: string;
   messages: DashboardMessages;
   snapshot: DashboardSnapshot;
 }) {
@@ -712,38 +1028,57 @@ function PlanPanel({
     );
   }
 
+  const firstGoal = snapshot.goals[0];
+  const boardTitle = localizedText(
+    snapshot.board,
+    locale,
+    "title",
+    snapshot.board.title
+  );
+  const boardTask = snapshot.board.task
+    ? localizedText(snapshot.board, locale, "task", snapshot.board.task)
+    : "";
+  const firstGoalTitle = firstGoal
+    ? localizedText(firstGoal, locale, "title", firstGoal.title)
+    : "";
+  const showBoardOverview =
+    !firstGoal ||
+    !sameDisplayText(boardTitle, firstGoalTitle) ||
+    (Boolean(boardTask) && !sameDisplayText(boardTask, boardTitle));
+
   return (
     <div className="space-y-4 p-4">
-      <section className="rounded-md border border-border bg-muted/15 p-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h2 className="truncate text-sm font-semibold">
-              {localizedText(
-                snapshot.board,
-                locale,
-                "title",
-                snapshot.board.title
+      {showBoardOverview && (
+        <section className="rounded-md border border-border bg-muted/15 p-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="truncate text-sm font-semibold">{boardTitle}</h2>
+              {boardTask && (
+                <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                  {boardTask}
+                </p>
               )}
-            </h2>
-            {snapshot.board.task && (
-              <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                {localizedText(
-                  snapshot.board,
-                  locale,
-                  "task",
-                  snapshot.board.task
-                )}
-              </p>
-            )}
+            </div>
+            <Badge
+              variant={snapshot.board.archiveReady ? "default" : "outline"}
+              className={
+                snapshot.board.archiveReady ? "" : goalStatusBadgeClass.active
+              }
+            >
+              {snapshot.board.archiveReady
+                ? messages.archiveReady
+                : messages.goalStatus.active}
+            </Badge>
           </div>
-          <Badge variant={snapshot.board.archiveReady ? "default" : "outline"}>
-            {snapshot.board.archiveReady ? messages.archiveReady : snapshot.board.status}
-          </Badge>
-        </div>
-      </section>
+        </section>
+      )}
       <PlanTree goals={snapshot.goals} locale={locale} messages={messages} />
     </div>
   );
+}
+
+function sameDisplayText(left: string, right: string) {
+  return left.trim().toLocaleLowerCase() === right.trim().toLocaleLowerCase();
 }
 
 function ArchivePlan({
@@ -752,7 +1087,7 @@ function ArchivePlan({
   messages,
 }: {
   goals: DashboardSnapshot["goals"];
-  locale: SupportedLocale;
+  locale: string;
   messages: DashboardMessages;
 }) {
   return (
@@ -779,16 +1114,19 @@ function PlanTree({
   messages,
 }: {
   goals: DashboardSnapshot["goals"];
-  locale: SupportedLocale;
+  locale: string;
   messages: DashboardMessages;
 }) {
   return (
     <div className="space-y-3">
       {goals.map((goal) => (
         <section key={goal.id} className="space-y-2">
-          <article className="rounded-md border border-border bg-background p-3">
+          <article className="rounded-md border border-l-4 border-border border-l-cyan-500 bg-cyan-50/45 p-3 dark:bg-cyan-950/20">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
+                <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-300">
+                  {messages.goal}
+                </div>
                 <h3 className="truncate text-sm font-semibold">
                   {localizedText(goal, locale, "title", goal.title)}
                 </h3>
@@ -798,17 +1136,23 @@ function PlanTree({
                   </p>
                 )}
               </div>
-              <Badge variant="secondary">{goal.status}</Badge>
+              <GoalStatusBadge
+                messages={messages}
+                status={goal.status as GoalStatus}
+              />
             </div>
           </article>
 
           {goal.milestones.map((milestone) => (
             <article
               key={milestone.id}
-              className="rounded-md border border-border bg-muted/10 p-3"
+              className="rounded-md border border-l-4 border-border border-l-violet-500 bg-violet-50/45 p-3 dark:bg-violet-950/20"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
+                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-300">
+                    {messages.milestone}
+                  </div>
                   <h4 className="truncate text-xs font-semibold">
                     {localizedText(
                       milestone,
@@ -830,18 +1174,27 @@ function PlanTree({
                     </p>
                   )}
                 </div>
-                <PriorityBadge
-                  messages={messages}
-                  priority={milestone.priority as CardPriority}
-                />
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  <MilestoneStatusBadge
+                    messages={messages}
+                    status={milestone.status as MilestoneStatus}
+                  />
+                  <PriorityBadge
+                    messages={messages}
+                    priority={milestone.priority as CardPriority}
+                  />
+                </div>
               </div>
               <div className="mt-3 grid gap-2">
                 {milestone.cards.slice(0, 4).map((card) => (
                   <div
                     key={card.id}
-                    className="flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5"
+                    data-card-plan-status={card.status}
+                    className={`flex items-center gap-2 rounded-md border border-l-4 border-border px-2 py-1.5 ${planCardAccentClass[card.status as CardStatus]}`}
                   >
-                    <CircleDot className="size-3 text-accent-cyan" />
+                    <CircleDot
+                      className={`size-3 ${planCardDotClass[card.status as CardStatus]}`}
+                    />
                     <span className="min-w-0 flex-1 truncate text-[11px]">
                       {localizedText(card, locale, "title", card.title)}
                     </span>
@@ -862,18 +1215,25 @@ function CurrentWorkVisual({
   messages,
   snapshot,
 }: {
-  locale: SupportedLocale;
+  locale: string;
   messages: DashboardMessages;
   snapshot: DashboardSnapshot;
 }) {
   const latest = snapshot.activityEntries[0];
+  const hasCards = snapshot.cards.length > 0;
+  const doneCount = snapshot.cards.filter((card) => card.status === "done").length;
+  const averageCardProgress = hasCards
+    ? snapshot.cards.reduce(
+        (total, card) =>
+          total + statusProgressWeight[card.status as CardStatus],
+        0
+      ) / snapshot.cards.length
+    : 0;
   const focusCard =
     snapshot.cards.find((card) => card.status === "doing") ??
     snapshot.cards.find((card) => card.status === "review") ??
     snapshot.cards.find((card) => card.status === "ready");
-  const currentPhase = latest?.phase === "fail" ? "verify" : latest?.phase ?? "start";
-  const phaseIndex = Math.max(0, phases.findIndex((phase) => phase === currentPhase));
-  const progress = (phaseIndex / (phases.length - 1)) * 100;
+  const progress = Math.round(averageCardProgress * 100);
 
   return (
     <section className="rounded-md border border-border bg-muted/10 p-3">
@@ -889,45 +1249,31 @@ function CurrentWorkVisual({
               : messages.noActivity}
           </p>
         </div>
-        {latest && <PhaseBadge messages={messages} phase={latest.phase} />}
+        <div className="flex shrink-0 items-center gap-2">
+          {hasCards && (
+            <Badge variant="outline" className="font-mono">
+              {progress}%
+            </Badge>
+          )}
+        </div>
       </div>
 
       <div className="mt-4">
-        <div className="relative h-2 rounded-full bg-muted">
+        <div className="mb-2 flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
+          <span>{messages.overallProgress}</span>
+          <span>
+            {doneCount}/{snapshot.cards.length} {messages.progressOfCards}
+          </span>
+        </div>
+        <div className="relative h-2 rounded-full bg-muted" data-testid="work-progress-track">
           <div
+            data-testid="work-progress-bar"
+            data-work-progress={progress}
             className={`absolute left-0 top-0 h-2 rounded-full ${
               latest?.phase === "fail" ? "bg-risk-high" : "bg-accent-cyan"
             }`}
             style={{ width: `${progress}%` }}
           />
-        </div>
-        <div className="mt-2 grid grid-cols-5 gap-2">
-          {phases.map((phase, index) => {
-            const active = index === phaseIndex;
-            const complete = index < phaseIndex;
-
-            return (
-              <div
-                key={phase}
-                className="flex min-w-0 flex-col items-center gap-1 text-center"
-              >
-                <span
-                  className={`flex size-7 items-center justify-center rounded-full border text-[10px] ${
-                    active
-                      ? "border-accent-cyan bg-accent-cyan/15 text-accent-cyan ring-4 ring-accent-cyan/20"
-                      : complete
-                        ? "border-status-done/40 bg-status-done/10 text-status-done"
-                        : "border-border bg-background text-muted-foreground"
-                  }`}
-                >
-                  {complete ? <CheckCircle2 className="size-3" /> : index + 1}
-                </span>
-                <span className="truncate text-[10px] text-muted-foreground">
-                  {messages.phase[phase]}
-                </span>
-              </div>
-            );
-          })}
         </div>
       </div>
 
@@ -955,7 +1301,7 @@ function KanbanMatrix({
   readOnly = false,
 }: {
   cards: DashboardCard[];
-  locale: SupportedLocale;
+  locale: string;
   messages: DashboardMessages;
   readOnly?: boolean;
 }) {
@@ -1009,7 +1355,7 @@ function KanbanRow({
   status,
 }: {
   cards: DashboardCard[];
-  locale: SupportedLocale;
+  locale: string;
   messages: DashboardMessages;
   readOnly: boolean;
   status: CardStatus;
@@ -1055,7 +1401,7 @@ function KanbanCell({
   status,
 }: {
   cards: DashboardCard[];
-  locale: SupportedLocale;
+  locale: string;
   messages: DashboardMessages;
   priority: CardPriority;
   readOnly: boolean;
@@ -1077,7 +1423,12 @@ function KanbanCell({
         readOnly ? (
           <StaticCard key={card.id} card={card} locale={locale} />
         ) : (
-          <DraggableCard key={card.id} card={card} locale={locale} />
+          <DraggableCard
+            key={card.id}
+            card={card}
+            locale={locale}
+            messages={messages}
+          />
         )
       )}
       {cards.length === 0 && (
@@ -1092,9 +1443,11 @@ function KanbanCell({
 function DraggableCard({
   card,
   locale,
+  messages,
 }: {
   card: DashboardCard;
-  locale: SupportedLocale;
+  locale: string;
+  messages: DashboardMessages;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({ id: card.id });
@@ -1114,7 +1467,7 @@ function DraggableCard({
         <button
           type="button"
           className="mt-0.5 text-muted-foreground"
-          aria-label={dashboardMessages[locale].moveCard}
+          aria-label={messages.moveCard}
           {...listeners}
           {...attributes}
         >
@@ -1131,7 +1484,7 @@ function StaticCard({
   locale,
 }: {
   card: DashboardCard;
-  locale: SupportedLocale;
+  locale: string;
 }) {
   return (
     <article
@@ -1150,7 +1503,7 @@ function CardBody({
   locale,
 }: {
   card: DashboardCard;
-  locale: SupportedLocale;
+  locale: string;
 }) {
   return (
     <div className="min-w-0 flex-1">
@@ -1179,13 +1532,136 @@ function CardBody({
   );
 }
 
+function ArchiveSuggestions({
+  locale,
+  messages,
+  onSelect,
+  suggestions,
+}: {
+  locale: string;
+  messages: DashboardMessages;
+  onSelect: (suggestion: DuckSuggestion) => void;
+  suggestions: DuckSuggestion[];
+}) {
+  return (
+    <section className="rounded-md border border-border p-3">
+      <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
+        <Sparkles className="size-4 text-accent-cyan" />
+        {messages.duckSuggestions}
+      </div>
+      {suggestions.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{messages.duckIdle}</p>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {suggestions.slice(0, 5).map((suggestion) => (
+            <button
+              key={suggestion.id}
+              type="button"
+              onClick={() => onSelect(suggestion)}
+              className="rounded-full border border-border bg-background px-3 py-1.5 text-xs font-medium hover:border-accent-cyan hover:bg-accent-cyan/10"
+            >
+              {localizedText(
+                suggestion,
+                locale,
+                "keyword",
+                suggestion.keyword
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function SuggestionDialog({
+  locale,
+  messages,
+  onOpenChange,
+  selected,
+}: {
+  locale: string;
+  messages: DashboardMessages;
+  onOpenChange: (open: boolean) => void;
+  selected: DuckSuggestion | null;
+}) {
+  const [copiedSuggestionId, setCopiedSuggestionId] = React.useState<string | null>(
+    null
+  );
+  const copied = Boolean(selected?.id && copiedSuggestionId === selected.id);
+
+  async function copyPrompt() {
+    if (!selected) return;
+    const prompt = localizedText(
+      selected,
+      locale,
+      "actionPrompt",
+      selected.actionPrompt || selected.detail || selected.title
+    );
+    await navigator.clipboard.writeText(prompt);
+    setCopiedSuggestionId(selected.id);
+    window.setTimeout(() => {
+      setCopiedSuggestionId((current) =>
+        current === selected.id ? null : current
+      );
+    }, 1400);
+  }
+
+  const detail = selected
+    ? localizedText(selected, locale, "detail", selected.detail)
+    : "";
+  const actionPrompt = selected
+    ? localizedText(selected, locale, "actionPrompt", selected.actionPrompt)
+    : "";
+
+  return (
+    <Dialog open={Boolean(selected)} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-xl">
+        {selected && (
+          <>
+            <DialogHeader>
+              <DialogTitle>
+                {localizedText(selected, locale, "title", selected.title)}
+              </DialogTitle>
+              <DialogDescription>
+                {localizedText(selected, locale, "summary", selected.summary)}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              {detail && (
+                <p className="text-sm leading-6 text-foreground">
+                  {detail}
+                </p>
+              )}
+              <section className="rounded-md border border-border bg-muted/20 p-3">
+                <div className="mb-2 text-xs font-medium text-muted-foreground">
+                  {messages.duckPrompt}
+                </div>
+                <p className="whitespace-pre-wrap font-mono text-xs leading-5">
+                  {actionPrompt}
+                </p>
+              </section>
+            </div>
+            <DialogFooter>
+              <Button type="button" onClick={copyPrompt}>
+                <Copy className="size-4" />
+                {copied ? messages.duckCopied : messages.duckCopyPrompt}
+              </Button>
+            </DialogFooter>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function RubberDuck({
   locale,
   messages,
   onRefresh,
   suggestions,
 }: {
-  locale: SupportedLocale;
+  locale: string;
   messages: DashboardMessages;
   onRefresh: () => Promise<void>;
   suggestions: DuckSuggestion[];
@@ -1198,7 +1674,6 @@ function RubberDuck({
   const [chipsVisible, setChipsVisible] = React.useState(false);
   const [burstKey, setBurstKey] = React.useState(0);
   const [selected, setSelected] = React.useState<DuckSuggestion | null>(null);
-  const [copied, setCopied] = React.useState(false);
   const unreadCount = suggestions.filter((suggestion) => !suggestion.readAt).length;
   const visibleSuggestions = suggestions.slice(0, 5);
 
@@ -1208,24 +1683,10 @@ function RubberDuck({
 
   async function openSuggestion(suggestion: DuckSuggestion) {
     setSelected(suggestion);
-    setCopied(false);
     if (!suggestion.readAt) {
       await patchJson(`/api/duck-suggestions/${suggestion.id}`, {});
       await onRefresh();
     }
-  }
-
-  async function copyPrompt() {
-    if (!selected) return;
-    const prompt = localizedText(
-      selected,
-      locale,
-      "actionPrompt",
-      selected.actionPrompt || selected.detail || selected.title
-    );
-    await navigator.clipboard.writeText(prompt);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1400);
   }
 
   function handleDuckClick() {
@@ -1316,46 +1777,12 @@ function RubberDuck({
         </button>
       </div>
 
-      <Dialog open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)}>
-        <DialogContent className="sm:max-w-xl">
-          {selected && (
-            <>
-              <DialogHeader>
-                <DialogTitle>
-                  {localizedText(selected, locale, "title", selected.title)}
-                </DialogTitle>
-                <DialogDescription>
-                  {localizedText(selected, locale, "summary", selected.summary)}
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4">
-                <p className="text-sm leading-6 text-foreground">
-                  {localizedText(selected, locale, "detail", selected.detail)}
-                </p>
-                <section className="rounded-md border border-border bg-muted/20 p-3">
-                  <div className="mb-2 text-xs font-medium text-muted-foreground">
-                    {messages.duckPrompt}
-                  </div>
-                  <p className="whitespace-pre-wrap font-mono text-xs leading-5">
-                    {localizedText(
-                      selected,
-                      locale,
-                      "actionPrompt",
-                      selected.actionPrompt
-                    )}
-                  </p>
-                </section>
-              </div>
-              <DialogFooter>
-                <Button type="button" onClick={copyPrompt}>
-                  <Copy className="size-4" />
-                  {copied ? messages.duckCopied : messages.duckCopyPrompt}
-                </Button>
-              </DialogFooter>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
+      <SuggestionDialog
+        locale={locale}
+        messages={messages}
+        onOpenChange={(open) => !open && setSelected(null)}
+        selected={selected}
+      />
     </div>
   );
 }
@@ -1399,7 +1826,7 @@ function ActivitySheet({
   activities: DashboardActivity[];
   cards: DashboardCard[];
   doingCount: number;
-  locale: SupportedLocale;
+  locale: string;
   messages: DashboardMessages;
   timeZone: string;
 }) {
@@ -1491,7 +1918,7 @@ function ActivityFeed({
   timeZone,
 }: {
   activities: DashboardActivity[];
-  locale: SupportedLocale;
+  locale: string;
   messages: DashboardMessages;
   timeZone: string;
 }) {
@@ -1521,7 +1948,7 @@ function ActivityItem({
   timeZone,
 }: {
   activity: DashboardActivity;
-  locale: SupportedLocale;
+  locale: string;
   messages: DashboardMessages;
   timeZone: string;
 }) {

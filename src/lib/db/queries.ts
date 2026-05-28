@@ -124,6 +124,20 @@ function normalized(value = "") {
   return value.trim().toLowerCase();
 }
 
+function rowMatchesTitle(
+  row: { title: string; translationsJson?: string },
+  requestedTitle = ""
+) {
+  const requested = normalized(requestedTitle);
+  if (!requested) return false;
+  if (normalized(row.title) === requested) return true;
+
+  const translations = parseJson<LocaleTranslations>(row.translationsJson ?? "{}", {});
+  return Object.values(translations).some(
+    (translation) => normalized(translation.title) === requested
+  );
+}
+
 function shouldReplacePlan(input: PlanInput) {
   if (input.replace !== undefined) return input.replace;
   return Boolean(input.goals?.length || input.milestones?.length);
@@ -723,7 +737,7 @@ export function upsertPlan(input: PlanInput) {
 
   for (const [index, card] of requestedCards.entries()) {
     const existingCard = existingCards.find(
-      (item) => normalized(item.title) === normalized(card.title)
+      (item) => rowMatchesTitle(item, card.title)
     );
 
     if (existingCard) {
@@ -860,6 +874,7 @@ export function markDuckSuggestionRead(id: string) {
 export function updateCardProgress(input: CardProgressInput) {
   const board = getActiveBoardRow();
   const db = getDb();
+  const lookupById = Boolean(input.id);
   const card = input.id
     ? db
         .select()
@@ -873,7 +888,7 @@ export function updateCardProgress(input: CardProgressInput) {
           .where(eq(cards.boardId, board.id))
           .orderBy(asc(cards.position))
           .all()
-          .find((item) => normalized(item.title) === normalized(input.title))
+          .find((item) => rowMatchesTitle(item, input.title))
       : undefined;
 
   if (!card) {
@@ -886,7 +901,7 @@ export function updateCardProgress(input: CardProgressInput) {
   }
 
   const patch = compactPatch({
-    title: input.title?.trim(),
+    title: lookupById ? input.title?.trim() : undefined,
     summary: input.summary?.trim(),
     translationsJson: input.translations
       ? stringifyTranslations(input.translations)
@@ -1023,6 +1038,33 @@ export function archiveActiveBoard() {
 
   publishDashboardEvent({ kind: "snapshot", id: nextBoardId, message: "archive" });
   return { archived: true, archiveId, boardId: nextBoardId };
+}
+
+export function deleteArchive(id: string) {
+  ensureSeedData();
+  const db = getDb();
+  const archive = db
+    .select()
+    .from(boardArchives)
+    .where(eq(boardArchives.id, id))
+    .get();
+
+  if (!archive) {
+    return { deleted: false, reason: "not-found" as const, id };
+  }
+
+  db.delete(boardArchives).where(eq(boardArchives.id, id)).run();
+  publishDashboardEvent({ kind: "snapshot", id, message: "archive-deleted" });
+  return { deleted: true, id };
+}
+
+export function clearArchives() {
+  ensureSeedData();
+  const db = getDb();
+  const count = db.select().from(boardArchives).all().length;
+  db.delete(boardArchives).run();
+  publishDashboardEvent({ kind: "snapshot", message: "archives-cleared" });
+  return { deleted: count };
 }
 
 export function addActivity(input: {

@@ -26,6 +26,10 @@ The skill must:
 8. Record phase-level activity and card status updates while doing the requested work.
 9. Completed boards archive automatically after all cards are `done` and `result` activity is recorded.
 
+Progress updates are never source-code edits. They flow through CLI -> REST API -> SQLite -> SSE -> React re-render.
+
+When Plan Mode emits `<proposed_plan>`, convert it to `plan --plan-json` before implementation. The title becomes board/goal, major sections become milestones, execution bullets become cards, test bullets become verification cards, and assumptions become low-priority reference cards or milestone summary. No major execution item, test item, or assumption should be dropped. Dashboard bookkeeping such as importing, converting, or syncing the plan is metadata and should not appear as a visible Work Card.
+
 ## Activity Phases
 
 - `start`: task accepted and dashboard ready.
@@ -75,10 +79,10 @@ No dashboard prompt input or agent command queue is required.
 
 ## Locale
 
-The UI shell detects `navigator.languages`, supports English and Korean, and falls back to English for unsupported locales. API data is stored as original agent text plus optional `translations` maps; the LLM agent is responsible for supplying translated Plan/Kanban titles and summaries.
+The UI shell detects `navigator.languages`, supports English and Korean, and falls back to English for unsupported shell languages. Plan/Kanban content uses the browser-native locale by default, then `en`, then source text. The header can switch content display to English. API data is stored as original agent text plus optional `translations` maps; the LLM agent is responsible for supplying translated Plan/Kanban titles and summaries.
 
 Rubber Duck suggestions follow the same translation rule for keyword, title, summary, detail, and action prompt.
 
 ## Launcher
 
-`vibe-with-dashboard ensure` starts the dashboard through the production launcher by default. Set `VIBE_DASHBOARD_DEV=1` only when intentionally running the dashboard in development mode.
+`vibe-with-dashboard ensure` starts the dashboard through `next dev` by default so monitored UI changes are visible immediately. The dashboard hides the Next.js on-screen dev indicator while leaving build/runtime errors available. Set `VIBE_DASHBOARD_PROD=1` only when intentionally running the dashboard in production mode.

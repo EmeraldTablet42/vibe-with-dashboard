@@ -251,11 +251,13 @@ function installProjectRules(projectRoot, dryRun) {
     "Use `$vibe-with-dashboard` when project work should be reflected in the local monitoring dashboard.",
     "Before work, run `node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js ensure`.",
     "Use detailed `plan --plan-json` for real work plans, then `snapshot` before choosing the next Work Card.",
+    "If Plan Mode emits `<proposed_plan>`, convert it to detailed `plan --plan-json`; preserve sections, execution bullets, tests, and assumptions.",
     "Record plan, implement, verify, result, and fail updates with the project-local Vibe with Dashboard CLI.",
     "Move cards with `card --card \"...\" --status doing|review|done` or activity card flags as work units change state.",
     "Completed boards archive automatically after all cards are done and result activity is recorded.",
-    "Include `translations` for Plan/Kanban titles and summaries when the user's locale is known.",
+    "Include `translations` for Plan/Kanban titles and summaries in both the user's locale and `en` when the user's locale is known.",
     "Use `suggest --suggestion-json` for Rubber Duck suggestions when project advice should be visible.",
+    "Progress updates must use the CLI/API state path, not dashboard source-code edits.",
     "Keep dashboard entries concise and never store secrets, credentials, private reasoning, or long terminal logs.",
   ].join("\n");
   writeMarkerFile(path.join(projectRoot, "AGENTS.md"), body, dryRun);

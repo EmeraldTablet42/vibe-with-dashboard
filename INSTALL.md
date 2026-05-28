@@ -31,7 +31,7 @@ What it does:
 - Adds a small marker block to `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md`.
 - Leaves global agent settings alone unless `--global`, `--all`, or `--only <agent>` is passed.
 - Skips unrelated services and never kills a process just because it owns port `3000`.
-- Runs the dashboard in production mode by default. Use `VIBE_DASHBOARD_DEV=1` only for dashboard development.
+- Runs the dashboard in dev mode by default so code changes appear immediately. The Next.js on-screen dev indicator is hidden; use `VIBE_DASHBOARD_PROD=1` only when you explicitly want production mode.
 
 Preview without writing:
 
@@ -120,9 +120,11 @@ Expected:
 - Kanban shows at least one card.
 - Card status changes appear without reloading the dashboard.
 - Completed boards archive automatically after result activity when every card is done.
-- If the browser locale is Korean and the agent supplied Korean translations, Plan/Kanban items use those translated titles and summaries.
+- If the browser locale is Korean and the agent supplied Korean plus English translations, Plan/Kanban items use Korean by default and can be toggled to English.
 - Rubber Duck appears at the bottom-right and can show agent-written suggestion keywords.
 - Activity sheet shows the result entry.
+
+Progress is data-driven: agent CLI commands call local API endpoints, the dashboard stores state in SQLite, and the browser refreshes through SSE. Agents should not edit dashboard source code just to move progress.
 
 ## Uninstall
 

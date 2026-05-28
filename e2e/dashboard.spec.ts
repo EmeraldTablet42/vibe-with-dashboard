@@ -64,11 +64,17 @@ test("English monitoring shell loads with archive and folded panels", async ({
           summary: "첫 모니터링 흐름을 준비한다.",
           task: "온보딩 구현",
         },
+        en: {
+          title: "Implement onboarding",
+          summary: "Prepare the first monitored workflow.",
+          task: "Implement onboarding",
+        },
       },
       milestone: {
         title: "Current work",
         translations: {
           ko: { title: "현재 작업", summary: "구현 단계" },
+          en: { title: "Current work", summary: "Implementation stage" },
         },
       },
       cards: [
@@ -77,6 +83,7 @@ test("English monitoring shell loads with archive and folded panels", async ({
           summary: "Render the main active board.",
           translations: {
             ko: { title: "화면 만들기", summary: "활성 보드를 렌더링한다." },
+            en: { title: "Create screen", summary: "Render the main active board." },
           },
           priority: "high",
           status: "ready",
@@ -88,10 +95,16 @@ test("English monitoring shell loads with archive and folded panels", async ({
   await expect(
     page.getByRole("heading", { name: "Implement onboarding" }).first()
   ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Implement onboarding" })
+  ).toHaveCount(1);
   await expect(page.getByRole("heading", { name: "Create screen" })).toBeVisible();
   await expect(
     page.locator('[data-testid="kanban-card"][data-card-title="Create screen"][data-card-status="ready"]')
   ).toBeVisible();
+  const readyProgress = Number(
+    await page.getByTestId("work-progress-bar").getAttribute("data-work-progress")
+  );
   await page.request.post("/api/agent/activity", {
     data: {
       phase: "implement",
@@ -103,8 +116,19 @@ test("English monitoring shell loads with archive and folded panels", async ({
   await expect(
     page.locator('[data-testid="kanban-card"][data-card-title="Create screen"][data-card-status="doing"]')
   ).toBeVisible();
+  await expect
+    .poll(async () =>
+      Number(await page.getByTestId("work-progress-bar").getAttribute("data-work-progress"))
+    )
+    .toBeGreaterThan(readyProgress);
+  await expect(page.getByText("Progress", { exact: true })).toBeVisible();
+  await expect(page.getByText("Build", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Ready", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("High", { exact: true }).first()).toBeVisible();
+  await expect(page.locator('[data-status-badge="ready"]').first()).toBeVisible();
+  await expect(page.locator('[data-priority-badge="high"]').first()).toBeVisible();
+  await expect(page.locator('[data-goal-status-badge="active"]').first()).toBeVisible();
+  await expect(page.locator('[data-milestone-status-badge="active"]').first()).toBeVisible();
 
   await expect(page.getByPlaceholder(/Codex/)).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Run" })).toHaveCount(0);
@@ -195,6 +219,51 @@ test("English monitoring shell loads with archive and folded panels", async ({
   await page.getByTestId("rubber-duck-minimized").click();
   await expect(page.getByTestId("rubber-duck")).toBeVisible();
 
+  await page.request.post("/api/agent/activity", {
+    data: {
+      phase: "result",
+      title: "Archive ready",
+      message: "Archive this board with its duck suggestion.",
+      cards: [{ title: "Create screen", status: "done" }],
+    },
+  });
+  await page.getByRole("tab", { name: /Archive/ }).click();
+  await expect(page.getByRole("heading", { name: "Implement onboarding" }).first()).toBeVisible();
+  await expect(page.getByText("Suggestions", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Tests" }).click();
+  await expect(page.getByRole("heading", { name: "Add coverage" })).toBeVisible();
+  await page.getByRole("button", { name: "Copy prompt" }).click();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe("Add tests for the Rubber Duck suggestion path.");
+  await page.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "Delete archive" }).last().click();
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(page.getByText("No archived boards")).toBeVisible();
+
+  await page.request.post("/api/agent/plan", {
+    data: {
+      task: "Clear archive smoke",
+      title: "Clear archive smoke",
+      replace: true,
+      cards: [{ title: "Clearable card", status: "ready", priority: "medium" }],
+    },
+  });
+  await page.request.post("/api/agent/activity", {
+    data: {
+      phase: "result",
+      title: "Clear archive ready",
+      message: "Create one archive for clear-all.",
+      cards: [{ title: "Clearable card", status: "done" }],
+    },
+  });
+  await page.getByRole("tab", { name: /Archive/ }).click();
+  await expect(page.getByRole("heading", { name: "Clear archive smoke" }).first()).toBeVisible();
+  await page.getByRole("button", { name: "Clear all archives" }).click();
+  await page.getByRole("button", { name: "Clear", exact: true }).click();
+  await expect(page.getByText("No archived boards")).toBeVisible();
+  await page.getByRole("tab", { name: /Active/ }).click();
+
   await page.getByRole("button", { name: "Activity" }).click();
   await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
   await expect(page.getByText("Activities")).toBeVisible();
@@ -240,15 +309,22 @@ test("Korean browser locale localizes shell and agent-supplied items", async ({
       title: "Implement onboarding",
       translations: {
         ko: { title: "온보딩 구현", task: "온보딩 구현" },
+        en: { title: "Implement onboarding", task: "Implement onboarding" },
       },
       milestone: {
         title: "Current work",
-        translations: { ko: { title: "현재 작업" } },
+        translations: {
+          ko: { title: "현재 작업" },
+          en: { title: "Current work" },
+        },
       },
       cards: [
         {
           title: "Create screen",
-          translations: { ko: { title: "화면 만들기" } },
+          translations: {
+            ko: { title: "화면 만들기" },
+            en: { title: "Create screen" },
+          },
           priority: "high",
           status: "ready",
         },
@@ -287,6 +363,12 @@ test("Korean browser locale localizes shell and agent-supplied items", async ({
   ).toBeVisible();
   await expect(page.getByRole("heading", { name: "화면 만들기" })).toBeVisible();
   await expect(page.getByText("현재 작업").first()).toBeVisible();
+  await page.getByRole("button", { name: "English" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Implement onboarding" }).first()
+  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Create screen" })).toBeVisible();
+  await page.getByRole("button", { name: "자국어" }).click();
   await page.getByRole("button", { name: "러버덕 제안 열기" }).click();
   await expect(page.getByTestId("duck-suggestion-chip")).toHaveText("테스트");
   await page.getByTestId("duck-suggestion-chip").click();

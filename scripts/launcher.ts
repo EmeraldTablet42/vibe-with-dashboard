@@ -11,7 +11,9 @@ const port = Number(process.env.DASHBOARD_PORT ?? process.env.PORT ?? 3000);
 const dashboardUrl = `http://${host}:${port}`;
 const appRoot = getAppRoot();
 const projectRoot = getProjectRoot();
-const isDevMode = process.env.VIBE_DASHBOARD_DEV === "1";
+const isDevMode =
+  process.env.VIBE_DASHBOARD_PROD !== "1" &&
+  process.env.VIBE_DASHBOARD_DEV !== "0";
 const launchMode = isDevMode ? "development" : "production";
 let child: ChildProcess | null = null;
 

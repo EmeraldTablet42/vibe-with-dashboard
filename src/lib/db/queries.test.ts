@@ -9,6 +9,8 @@ import { describe, expect, it, beforeEach } from "vitest";
 import {
   addActivity,
   addAgentCheckpoint,
+  clearArchives,
+  deleteArchive,
   getDashboardSnapshot,
   getSetting,
   markDuckSuggestionRead,
@@ -161,6 +163,34 @@ describe("vibe dashboard state", () => {
         ?.status
     ).toBe("doing");
     expect(snapshot.goals[0].milestones[0].status).toBe("active");
+  });
+
+  it("matches card progress updates by localized card title", async () => {
+    upsertPlan({
+      task: "Localized card matching",
+      replace: true,
+      cards: [
+        {
+          title: "Native content toggle",
+          status: "ready",
+          translations: {
+            ko: { title: "자국어 표시 전환" },
+            en: { title: "Native content toggle" },
+          },
+        },
+      ],
+    });
+
+    const updates = updateCardsProgress([
+      { title: "자국어 표시 전환", status: "doing" },
+    ]);
+    expect(updates[0]).toMatchObject({ updated: true });
+
+    const snapshot = await getDashboardSnapshot();
+    expect(snapshot.cards[0]).toMatchObject({
+      title: "Native content toggle",
+      status: "doing",
+    });
   });
 
   it("auto-archives when result activity and all cards are complete", async () => {
@@ -347,6 +377,43 @@ describe("vibe dashboard state", () => {
     expect(snapshot.board.isEmpty).toBe(true);
     expect(snapshot.cards).toHaveLength(0);
     expect(snapshot.archives).toHaveLength(1);
+  });
+
+  it("deletes archives individually and clears all archived boards", async () => {
+    for (const task of ["Archive one", "Archive two"]) {
+      upsertPlan({ task, replace: true, cards: [{ title: task, status: "ready" }] });
+      const planned = await getDashboardSnapshot();
+      updateCard(planned.cards[0].id, { status: "done" });
+      addActivity({
+        phase: "result",
+        title: "Done",
+        message: `${task} complete`,
+        task,
+      });
+    }
+
+    let snapshot = await getDashboardSnapshot();
+    expect(snapshot.archives).toHaveLength(2);
+
+    const firstArchiveId = snapshot.archives[0].id;
+    expect(deleteArchive(firstArchiveId)).toMatchObject({
+      deleted: true,
+      id: firstArchiveId,
+    });
+    expect(deleteArchive("missing-archive")).toMatchObject({
+      deleted: false,
+      reason: "not-found",
+    });
+
+    snapshot = await getDashboardSnapshot();
+    expect(snapshot.archives.map((archive) => archive.id)).not.toContain(
+      firstArchiveId
+    );
+    expect(snapshot.archives).toHaveLength(1);
+
+    expect(clearArchives()).toMatchObject({ deleted: 1 });
+    snapshot = await getDashboardSnapshot();
+    expect(snapshot.archives).toHaveLength(0);
   });
 
   it("exposes Vibe with Dashboard launch settings without queue state", async () => {

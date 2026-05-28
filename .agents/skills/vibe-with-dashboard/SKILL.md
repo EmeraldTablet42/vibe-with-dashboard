@@ -18,13 +18,32 @@ Use this skill before doing the user's requested project work when monitoring is
 4. Tell the user the dashboard URL in one short sentence.
 5. Create or replace the active board with the real working plan. Prefer detailed `--plan-json` when you already have a Codex/agent plan, so milestones and cards are not collapsed:
    `node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js plan --plan-json "{\"task\":\"Implement onboarding\",\"title\":\"Onboarding\",\"summary\":\"Ship the first monitored flow\",\"milestones\":[{\"title\":\"UI\",\"cards\":[{\"title\":\"Create screen\",\"summary\":\"Render the active board\",\"status\":\"ready\",\"priority\":\"high\"}]}]}"`
-   When the user's locale is known, include agent-generated translations for Plan/Kanban item text.
+   When the user's locale is known, include agent-generated translations for Plan/Kanban item text. Always include the user's native locale and `en`.
+   If your Plan Mode emits `<proposed_plan>`, convert that plan into `--plan-json` before implementation. Do not summarize it away.
 6. Add 3-5 Rubber Duck suggestions when useful:
    `node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js suggest --suggestion-json "{\"keyword\":\"Tests\",\"title\":\"Add coverage\",\"actionPrompt\":\"Add tests for the current change.\"}"`
 7. Record start:
    `node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js activity --phase start --title "Work started" --message "<user task summary>" --task "<short-task-id>"`
 
 `ensure` owns dependency check, port selection, server start/reuse, state writing, and default browser opening. Do not ask the user to start the server manually.
+
+The launcher uses `next dev` by default so dashboard UI changes appear immediately. The app hides the Next.js on-screen dev indicator; use `VIBE_DASHBOARD_PROD=1` only for explicit production smoke checks.
+
+Progress updates must never be implemented by editing dashboard source code. For normal project work, update the dashboard only through the CLI/API path: CLI command -> REST API -> SQLite -> SSE -> React re-render.
+
+## Plan Mode Import Contract
+
+When a coding agent has a `<proposed_plan>`:
+
+- Plan title becomes the board and goal title.
+- Major sections become milestones.
+- Execution bullets become cards.
+- Test or verification bullets become verification cards.
+- Assumptions become low-priority reference cards or milestone summary text.
+- No major execution item, test item, or assumption may be dropped.
+- Do not create visible Work Cards for dashboard bookkeeping such as "import this plan", "convert proposed_plan", or "sync dashboard"; that contract is metadata, not project work.
+- Include `translations` for the user's locale and `en` on board/goal/milestone/card text when the user's locale is known.
+- Treat the dashboard snapshot as the next working instruction source after import.
 
 ## Work Loop
 
@@ -54,6 +73,7 @@ Use concise dashboard messages. Do not store private reasoning, long terminal du
 - The dashboard is monitoring-only: no prompt input or agent command queue.
 - Keep Plan and Kanban focused on the active task.
 - The UI shell detects browser locale. Translate Plan/Kanban titles and summaries yourself when a non-English locale is expected; the dashboard only selects stored translations.
+- For localized users, write both native-locale and `en` translations. The UI shows native text by default and lets the user switch content to English.
 - Rubber Duck suggestions are also agent-written. Translate their keyword, title, summary, detail, and action prompt when a non-English locale is expected.
 - When all cards are done and result activity is recorded, the dashboard archives the board and clears the Active Board automatically. Use `vibe-with-dashboard archive` only as a manual retry.
 

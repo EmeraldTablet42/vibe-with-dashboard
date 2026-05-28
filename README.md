@@ -63,7 +63,9 @@ The skill tells the agent to:
 5. Use the dashboard snapshot as the working milestone reference.
 6. Record `start`, `plan`, `implement`, `verify`, `result`, or `fail` activity.
 7. Move Work Cards to `doing`, `review`, or `done` as task units change state.
-8. Provide Plan/Kanban item translations when the agent knows the user's target locale.
+8. Provide Plan/Kanban item translations for the user's native locale and `en` when the target locale is known.
+
+Progress is data-driven, not code-driven: agents send CLI commands, the CLI calls the dashboard API, SQLite stores the new state, and SSE refreshes the open page. Normal work should never edit dashboard source code just to change progress.
 
 Manual commands:
 
@@ -104,7 +106,7 @@ node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js activity --phase result
 | Inspector | Repo, GitHub, design tokens, harness files, skills, MCP, subagents. |
 | Rubber Duck | Floating generated duck icon with unread suggestion badge, keyword chips, and copyable action prompts. |
 | Archive | Finished boards are stored automatically after every card is done and result activity is recorded. |
-| Locale | English by default, Korean supported, unsupported locales fall back to English. Agent-supplied Plan/Kanban translations are shown when available. |
+| Locale | Browser-native Plan/Kanban content by default, with an English toggle. Unsupported shell languages fall back to English. |
 
 ## Agent Support
 
@@ -132,6 +134,8 @@ Full matrix and flags live in [INSTALL.md](./INSTALL.md).
 5. The agent can write 3-5 Rubber Duck suggestions for the active board.
 6. Completed boards can be archived, then the active board returns to empty.
 
+When an agent has a `<proposed_plan>`, it should convert that plan into `plan --plan-json` before implementation. Plan title becomes board/goal, major sections become milestones, execution bullets become cards, test bullets become verification cards, and assumptions remain as low-priority reference cards or milestone summary. Do not drop major items. Do not add visible cards for dashboard bookkeeping such as importing or syncing the plan; that contract is metadata.
+
 ## Development
 
 ```bash
@@ -142,7 +146,7 @@ npm run build
 npm run e2e
 ```
 
-The launcher runs production `next start` by default and builds when needed. Use `VIBE_DASHBOARD_DEV=1 npm run dashboard` or `npm run dev` only when developing the dashboard itself.
+The launcher runs `next dev` by default so dashboard code changes show up immediately. Next's on-screen dev indicator is hidden; runtime/build errors still surface. Use `VIBE_DASHBOARD_PROD=1 npm run dashboard` when you explicitly want the production launcher.
 
 The app binds to `127.0.0.1`, stores local state in `.dashboard/`, and keeps private reasoning, credentials, secrets, and long terminal dumps out of activity records.
 
