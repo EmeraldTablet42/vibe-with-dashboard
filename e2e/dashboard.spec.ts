@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("monitoring cockpit loads with vertical kanban, activity, and folded inspector", async ({
+test("monitoring cockpit loads with resizable plan sidebar and folded panels", async ({
   page,
 }) => {
   const consoleErrors: string[] = [];
@@ -15,12 +15,14 @@ test("monitoring cockpit loads with vertical kanban, activity, and folded inspec
 
   await page.goto("/");
 
+  await expect(page.getByText("Vibe with Dashboard")).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Plan", exact: true })
   ).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Kanban", exact: true })
   ).toBeVisible();
+  await expect(page.getByText("활성 계획 없음")).toBeVisible();
   await expect(page.getByText("현재 처리 지점", { exact: true })).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Activity Timeline" })
@@ -30,6 +32,27 @@ test("monitoring cockpit loads with vertical kanban, activity, and folded inspec
   await expect(page.getByText("High", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Medium", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Low", { exact: true }).first()).toBeVisible();
+
+  const sidebar = page.getByTestId("plan-sidebar");
+  const defaultBox = await sidebar.boundingBox();
+  expect(defaultBox?.width).toBeGreaterThan(330);
+
+  const handle = page.getByLabel("Plan 폭 조절");
+  const handleBox = await handle.boundingBox();
+  expect(handleBox).not.toBeNull();
+  await page.mouse.move(handleBox!.x + 1, handleBox!.y + 20);
+  await page.mouse.down();
+  await page.mouse.move(handleBox!.x + 120, handleBox!.y + 20);
+  await page.mouse.up();
+
+  const resizedBox = await sidebar.boundingBox();
+  expect(resizedBox!.width).toBeGreaterThan(defaultBox!.width + 60);
+
+  await page.getByRole("button", { name: "Plan 접기" }).click();
+  await expect(sidebar).toHaveCount(0);
+  await page.getByRole("button", { name: "Plan 열기" }).first().click();
+  const reopenedBox = await page.getByTestId("plan-sidebar").boundingBox();
+  expect(Math.round(reopenedBox!.width)).toBe(Math.round(defaultBox!.width));
 
   await expect(page.getByPlaceholder(/Codex에게/)).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Run" })).toHaveCount(0);
@@ -55,7 +78,9 @@ test("monitoring cockpit loads with vertical kanban, activity, and folded inspec
 
   await page.getByLabel("Harness").click();
   await expect(page.getByText("Repo Skills", { exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "codex-dashboard" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "vibe-with-dashboard" })
+  ).toBeVisible();
   await expect(page.getByText("MCP Config", { exact: true })).toBeVisible();
   await expect(
     page.getByText("project-local MCP server 없음", { exact: true })

@@ -2,8 +2,10 @@ const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
 
-const root = process.cwd();
-const statePath = path.join(root, ".dashboard", "state.json");
+const projectRoot = path.resolve(
+  process.env.VIBE_DASHBOARD_PROJECT_ROOT || process.cwd()
+);
+const statePath = path.join(projectRoot, ".dashboard", "state.json");
 
 function readStateUrl() {
   if (process.env.DASHBOARD_URL) return process.env.DASHBOARD_URL;
@@ -82,7 +84,7 @@ async function main() {
   const title = args.title || phase;
   const task = args.task || "";
   const status = args.status || (phase === "fail" ? "failed" : "done");
-  const source = args.source || "codex";
+  const source = args.source || "agent";
   const metadata = args.metadata ? JSON.parse(args.metadata) : {};
   const baseUrl = readStateUrl();
 

@@ -3,12 +3,14 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import { getProjectRoot } from "@/lib/project-root";
+
 const execFileAsync = promisify(execFile);
 
 async function run(command: string, args: string[]) {
   try {
     const { stdout, stderr } = await execFileAsync(command, args, {
-      cwd: process.cwd(),
+      cwd: getProjectRoot(),
       timeout: 10_000,
       windowsHide: true,
     });
@@ -80,7 +82,7 @@ export async function getWorkspaceFiles(limit = 80) {
   async function walk(dir: string) {
     if (found.length >= limit) return;
     const entries = await fs.readdir(
-      path.join(/*turbopackIgnore: true*/ process.cwd(), dir),
+      path.join(getProjectRoot(), dir),
       { withFileTypes: true }
     );
 

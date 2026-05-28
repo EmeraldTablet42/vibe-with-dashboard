@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 
 const activitySchema = z.object({
   phase: z.enum(["start", "plan", "implement", "verify", "result", "fail"]),
-  source: z.string().min(1).default("codex"),
+  source: z.string().min(1).default("agent"),
   status: z.enum(["active", "done", "failed"]).default("done"),
   task: z.string().default(""),
   title: z.string().min(1),
@@ -16,7 +16,7 @@ const activitySchema = z.object({
   metadata: z.unknown().optional(),
   checkpoint: z
     .object({
-      agent: z.string().min(1).default("codex"),
+      agent: z.string().min(1).default("agent"),
       summary: z.string().min(1),
       status: z.enum(["active", "idle", "done", "failed"]).default("active"),
       payload: z.unknown().optional(),

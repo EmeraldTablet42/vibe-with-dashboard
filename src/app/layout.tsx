@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "My Project Dashboard",
-  description: "Agent-driven Codex cockpit for local project execution",
+  title: "Vibe with Dashboard",
+  description: "Local monitoring dashboard for LLM agent project work",
 };
 
 export default function RootLayout({

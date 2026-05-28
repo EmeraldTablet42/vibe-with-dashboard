@@ -7,6 +7,8 @@ import { ensureSeedData } from "@/lib/db/seed";
 import {
   activityEntries,
   agentCheckpoints,
+  boardArchives,
+  boards,
   cards,
   designTokens,
   goals,
@@ -43,49 +45,141 @@ function compactPatch<T extends Record<string, unknown>>(input: T) {
   ) as Partial<T>;
 }
 
-export async function getDashboardSnapshot() {
-  ensureSeedData();
-  const db = getDb();
+function getSettingsMap() {
+  return Object.fromEntries(
+    getDb()
+      .select()
+      .from(settings)
+      .all()
+      .map((setting) => [setting.key, setting.value])
+  );
+}
 
-  const [
+function getActiveBoardRow() {
+  ensureSeedData();
+  const settingsMap = getSettingsMap();
+  const configured = settingsMap.active_board_id
+    ? getDb()
+        .select()
+        .from(boards)
+        .where(eq(boards.id, settingsMap.active_board_id))
+        .get()
+    : undefined;
+
+  if (configured?.status === "active") return configured;
+
+  const active = getDb()
+    .select()
+    .from(boards)
+    .where(eq(boards.status, "active"))
+    .orderBy(desc(boards.updatedAt))
+    .get();
+
+  if (!active) {
+    initializeDatabase();
+    const id = randomUUID();
+    getDb()
+      .insert(boards)
+      .values({
+        id,
+        title: "No active plan",
+        task: "",
+        status: "active",
+        createdAt: now(),
+        updatedAt: now(),
+      })
+      .run();
+    upsertSetting("active_board_id", id);
+    return getDb().select().from(boards).where(eq(boards.id, id)).get()!;
+  }
+
+  upsertSetting("active_board_id", active.id);
+  return active;
+}
+
+function getBoardRows(boardId: string) {
+  const db = getDb();
+  const goalRows = db
+    .select()
+    .from(goals)
+    .where(eq(goals.boardId, boardId))
+    .orderBy(asc(goals.position))
+    .all();
+  const milestoneRows = db
+    .select()
+    .from(milestones)
+    .where(eq(milestones.boardId, boardId))
+    .orderBy(asc(milestones.position))
+    .all();
+  const cardRows = db
+    .select()
+    .from(cards)
+    .where(eq(cards.boardId, boardId))
+    .orderBy(asc(cards.position))
+    .all();
+  const activityRows = db
+    .select()
+    .from(activityEntries)
+    .where(eq(activityEntries.boardId, boardId))
+    .orderBy(desc(activityEntries.createdAt))
+    .limit(80)
+    .all();
+  const checkpointRows = db
+    .select()
+    .from(agentCheckpoints)
+    .where(eq(agentCheckpoints.boardId, boardId))
+    .orderBy(desc(agentCheckpoints.createdAt))
+    .limit(20)
+    .all();
+
+  const cardsWithDependencies = cardRows.map((card) => ({
+    ...card,
+    dependsOn: parseJson<string[]>(card.dependsOnJson, []),
+  }));
+
+  return {
     goalRows,
     milestoneRows,
     cardRows,
+    cardsWithDependencies,
     activityRows,
     checkpointRows,
+  };
+}
+
+export async function getDashboardSnapshot() {
+  const activeBoard = getActiveBoardRow();
+  const db = getDb();
+  const {
+    goalRows,
+    milestoneRows,
+    cardsWithDependencies,
+    activityRows,
+    checkpointRows,
+  } = getBoardRows(activeBoard.id);
+
+  const [
     tokenRows,
     harnessRows,
     subagentRows,
+    archiveRows,
     settingRows,
     repoStatus,
     githubStatus,
     workspaceFiles,
     harnessInventory,
   ] = await Promise.all([
-    Promise.resolve(db.select().from(goals).orderBy(asc(goals.position)).all()),
-    Promise.resolve(
-      db.select().from(milestones).orderBy(asc(milestones.position)).all()
-    ),
-    Promise.resolve(db.select().from(cards).orderBy(asc(cards.position)).all()),
-    Promise.resolve(
-      db
-        .select()
-        .from(activityEntries)
-        .orderBy(desc(activityEntries.createdAt))
-        .limit(80)
-        .all()
-    ),
-    Promise.resolve(
-      db
-        .select()
-        .from(agentCheckpoints)
-        .orderBy(desc(agentCheckpoints.createdAt))
-        .limit(20)
-        .all()
-    ),
     Promise.resolve(db.select().from(designTokens).orderBy(asc(designTokens.name)).all()),
     Promise.resolve(db.select().from(harnessProfiles).orderBy(asc(harnessProfiles.name)).all()),
     Promise.resolve(db.select().from(subagents).orderBy(asc(subagents.name)).all()),
+    Promise.resolve(
+      db
+        .select()
+        .from(boardArchives)
+        .orderBy(desc(boardArchives.createdAt))
+        .limit(20)
+        .all()
+    ),
     Promise.resolve(db.select().from(settings).all()),
     getRepoStatus(),
     getGithubStatus(),
@@ -96,15 +190,24 @@ export async function getDashboardSnapshot() {
   const settingsMap = Object.fromEntries(
     settingRows.map((setting) => [setting.key, setting.value])
   );
-
-  const cardsWithDependencies = cardRows.map((card) => ({
-    ...card,
-    dependsOn: parseJson<string[]>(card.dependsOnJson, []),
-  }));
+  const hasCards = cardsWithDependencies.length > 0;
+  const archiveReady =
+    hasCards &&
+    cardsWithDependencies.every((card) => card.status === "done") &&
+    activityRows.some((activity) => activity.phase === "result");
 
   return {
     generatedAt: now(),
-    appId: "codex-dashboard",
+    appId: "vibe-with-dashboard",
+    board: {
+      ...activeBoard,
+      isEmpty: goalRows.length === 0 && cardsWithDependencies.length === 0,
+      archiveReady,
+    },
+    archives: archiveRows.map((archive) => ({
+      ...archive,
+      snapshot: parseJson<Record<string, unknown>>(archive.snapshotJson, {}),
+    })),
     goals: goalRows.map((goal) => ({
       ...goal,
       milestones: milestoneRows
@@ -142,9 +245,226 @@ export async function getDashboardSnapshot() {
     harnessInventory,
     launch: {
       dashboardUrl: settingsMap.dashboard_url ?? "http://127.0.0.1:3000",
-      command: "$codex-dashboard <user task>",
+      command: "$vibe-with-dashboard <user task>",
     },
   };
+}
+
+export function upsertPlan(input: {
+  task: string;
+  title?: string;
+  summary?: string;
+  source?: string;
+  cards?: Array<{
+    title: string;
+    summary?: string;
+    priority?: CardPriority;
+    status?: CardStatus;
+    size?: string;
+    acceptanceCriteria?: string;
+    verificationCommand?: string;
+  }>;
+}) {
+  const board = getActiveBoardRow();
+  const title = input.title?.trim() || input.task.trim() || "Untitled task";
+  const summary =
+    input.summary?.trim() ||
+    "Agent 작업 계획이 생성되면 Plan과 Kanban에서 진행 상태를 관측한다.";
+  const db = getDb();
+
+  db.update(boards)
+    .set({
+      title,
+      task: input.task,
+      status: "active",
+      updatedAt: now(),
+    })
+    .where(eq(boards.id, board.id))
+    .run();
+
+  let goal = db
+    .select()
+    .from(goals)
+    .where(eq(goals.boardId, board.id))
+    .orderBy(asc(goals.position))
+    .get();
+
+  if (!goal) {
+    const goalId = randomUUID();
+    db.insert(goals)
+      .values({
+        id: goalId,
+        boardId: board.id,
+        title,
+        summary,
+        status: "active",
+        priority: "high",
+        position: 1,
+        createdAt: now(),
+        updatedAt: now(),
+      })
+      .run();
+    goal = db.select().from(goals).where(eq(goals.id, goalId)).get();
+  } else {
+    db.update(goals)
+      .set({ title, summary, status: "active", updatedAt: now() })
+      .where(eq(goals.id, goal.id))
+      .run();
+  }
+
+  if (!goal) throw new Error("failed to create goal");
+
+  let milestone = db
+    .select()
+    .from(milestones)
+    .where(eq(milestones.boardId, board.id))
+    .orderBy(asc(milestones.position))
+    .get();
+
+  if (!milestone) {
+    const milestoneId = randomUUID();
+    db.insert(milestones)
+      .values({
+        id: milestoneId,
+        boardId: board.id,
+        goalId: goal.id,
+        title: "Current work",
+        summary,
+        status: "active",
+        priority: "high",
+        position: 1,
+        createdAt: now(),
+        updatedAt: now(),
+      })
+      .run();
+    milestone = db.select().from(milestones).where(eq(milestones.id, milestoneId)).get();
+  }
+
+  if (!milestone) throw new Error("failed to create milestone");
+
+  const existingCards = db
+    .select()
+    .from(cards)
+    .where(eq(cards.boardId, board.id))
+    .all();
+  const requestedCards =
+    input.cards && input.cards.length > 0
+      ? input.cards
+      : [
+          {
+            title,
+            summary,
+            priority: "high" as const,
+            status: "ready" as const,
+            size: "M",
+          },
+        ];
+
+  for (const [index, card] of requestedCards.entries()) {
+    if (existingCards.some((item) => item.title === card.title)) continue;
+
+    db.insert(cards)
+      .values({
+        id: randomUUID(),
+        boardId: board.id,
+        milestoneId: milestone.id,
+        title: card.title,
+        summary: card.summary || summary,
+        status: card.status ?? "ready",
+        priority: card.priority ?? "medium",
+        size: card.size ?? "M",
+        acceptanceCriteria: card.acceptanceCriteria ?? "",
+        verificationCommand: card.verificationCommand ?? "",
+        dependsOnJson: JSON.stringify([]),
+        position: existingCards.length + index + 1,
+        createdAt: now(),
+        updatedAt: now(),
+      })
+      .run();
+  }
+
+  addActivity({
+    phase: "plan",
+    source: input.source ?? "agent",
+    status: "done",
+    task: input.task,
+    title: "Plan updated",
+    message: title,
+    metadata: { cards: requestedCards.length },
+  });
+
+  publishDashboardEvent({ kind: "snapshot", id: board.id, message: "plan" });
+  return { boardId: board.id };
+}
+
+export function archiveActiveBoard() {
+  const board = getActiveBoardRow();
+  const {
+    goalRows,
+    milestoneRows,
+    cardsWithDependencies,
+    activityRows,
+    checkpointRows,
+  } = getBoardRows(board.id);
+  const hasCards = cardsWithDependencies.length > 0;
+  const hasResult = activityRows.some((activity) => activity.phase === "result");
+  const allDone = hasCards && cardsWithDependencies.every((card) => card.status === "done");
+
+  if (!hasCards || !allDone || !hasResult) {
+    return {
+      archived: false,
+      reason: !hasCards
+        ? "no-cards"
+        : !allDone
+          ? "cards-not-done"
+          : "missing-result",
+    };
+  }
+
+  const archiveId = randomUUID();
+  const archivedAt = now();
+  getDb()
+    .insert(boardArchives)
+    .values({
+      id: archiveId,
+      boardId: board.id,
+      title: board.title,
+      task: board.task,
+      snapshotJson: JSON.stringify({
+        board,
+        goals: goalRows,
+        milestones: milestoneRows,
+        cards: cardsWithDependencies,
+        activityEntries: activityRows,
+        agentCheckpoints: checkpointRows,
+        archivedAt,
+      }),
+      createdAt: archivedAt,
+    })
+    .run();
+
+  getDb()
+    .update(boards)
+    .set({ status: "archived", archivedAt, updatedAt: archivedAt })
+    .where(eq(boards.id, board.id))
+    .run();
+
+  const nextBoardId = randomUUID();
+  getDb()
+    .insert(boards)
+    .values({
+      id: nextBoardId,
+      title: "No active plan",
+      task: "",
+      status: "active",
+      createdAt: archivedAt,
+      updatedAt: archivedAt,
+    })
+    .run();
+  upsertSetting("active_board_id", nextBoardId);
+
+  publishDashboardEvent({ kind: "snapshot", id: nextBoardId, message: "archive" });
+  return { archived: true, archiveId, boardId: nextBoardId };
 }
 
 export function addActivity(input: {
@@ -156,14 +476,15 @@ export function addActivity(input: {
   message: string;
   metadata?: unknown;
 }) {
-  ensureSeedData();
+  const board = getActiveBoardRow();
   const id = randomUUID();
   getDb()
     .insert(activityEntries)
     .values({
       id,
+      boardId: board.id,
       phase: input.phase,
-      source: input.source ?? "codex",
+      source: input.source ?? "agent",
       status: input.status ?? "done",
       task: input.task ?? "",
       title: input.title,
@@ -199,13 +520,14 @@ export function addAgentCheckpoint(input: {
   summary: string;
   payload?: unknown;
 }) {
-  ensureSeedData();
+  const board = getActiveBoardRow();
   const id = randomUUID();
   getDb()
     .insert(agentCheckpoints)
     .values({
       id,
-      agent: input.agent ?? "codex",
+      boardId: board.id,
+      agent: input.agent ?? "agent",
       task: input.task ?? "",
       status: input.status ?? "active",
       summary: input.summary,
@@ -229,18 +551,21 @@ export function updateCard(
   }
 ) {
   ensureSeedData();
+  const card = getDb().select().from(cards).where(eq(cards.id, cardId)).get();
   const patch = compactPatch({ ...input, updatedAt: now() });
   getDb().update(cards).set(patch).where(eq(cards.id, cardId)).run();
 
-  addActivity({
-    phase: "implement",
-    source: "dashboard",
-    status: "done",
-    task: cardId,
-    title: "Card updated",
-    message: `${cardId} 상태가 갱신되었다.`,
-    metadata: input,
-  });
+  if (card) {
+    addActivity({
+      phase: "implement",
+      source: "dashboard",
+      status: "done",
+      task: cardId,
+      title: "Card updated",
+      message: `${card.title} 상태가 갱신되었다.`,
+      metadata: input,
+    });
+  }
   publishDashboardEvent({ kind: "card", id: cardId, message: "updated" });
 }
 
@@ -285,7 +610,7 @@ export function updateMilestone(
 }
 
 export function upsertSetting(key: string, value: string) {
-  ensureSeedData();
+  initializeDatabase();
   getSqlite()
     .prepare(
       `INSERT INTO settings (key, value, updated_at)

@@ -37,6 +37,7 @@ yarn-error.log*
 
 # local dashboard state
 .dashboard/
+.vibe-with-dashboard/
 .codex/config.toml
 
 # vercel

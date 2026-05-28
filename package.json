@@ -1,14 +1,30 @@
 {
-  "name": "my_project_dashboard",
+  "name": "vibe-with-dashboard",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
+  "description": "Local monitoring dashboard and installable skill for LLM agent project work.",
+  "license": "MIT",
+  "homepage": "https://github.com/EmeraldTablet42/vibe-with-dashboard",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EmeraldTablet42/vibe-with-dashboard.git"
+  },
+  "bugs": {
+    "url": "https://github.com/EmeraldTablet42/vibe-with-dashboard/issues"
+  },
+  "bin": {
+    "vibe-with-dashboard": "./bin/vibe-with-dashboard.js",
+    "vibe-dashboard": "./bin/vibe-with-dashboard.js"
+  },
   "scripts": {
-    "dashboard:ensure": "node scripts/dashboard-ensure.cjs",
-    "dashboard:activity": "node scripts/dashboard-activity.cjs",
+    "dashboard:ensure": "node bin/vibe-with-dashboard.js ensure",
+    "dashboard:activity": "node bin/vibe-with-dashboard.js activity",
+    "dashboard:plan": "node bin/vibe-with-dashboard.js plan",
+    "dashboard:archive": "node bin/vibe-with-dashboard.js archive",
     "dashboard": "tsx scripts/launcher.ts",
     "dev": "next dev --turbopack --hostname 127.0.0.1 --port 3000",
     "dev:next": "next dev --turbopack --hostname 127.0.0.1 --port 3000",
-    "start:e2e": "next start --hostname 127.0.0.1 --port 3100",
+    "start:e2e": "node scripts/start-e2e.cjs",
     "db:seed": "tsx scripts/seed.ts",
     "build": "next build",
     "start": "next start",
@@ -19,6 +35,33 @@
     "e2e": "playwright test",
     "verify": "npm run lint && npm run typecheck && npm test"
   },
+  "files": [
+    "bin/",
+    "skills/",
+    "src/",
+    "scripts/",
+    "public/",
+    "e2e/",
+    "components.json",
+    "drizzle.config.ts",
+    "eslint.config.mjs",
+    "next.config.ts",
+    "package-lock.json",
+    "playwright.config.ts",
+    "postcss.config.mjs",
+    "tsconfig.json",
+    "vitest.config.ts",
+    "README.md",
+    "INSTALL.md",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "GEMINI.md",
+    "vibe_with_dashboard.md",
+    "install.sh",
+    "install.ps1",
+    "skills-lock.json",
+    "LICENSE"
+  ],
   "dependencies": {
     "@base-ui/react": "^1.5.0",
     "@dnd-kit/core": "^6.3.1",

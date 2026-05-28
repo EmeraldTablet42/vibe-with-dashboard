@@ -15,6 +15,8 @@ import {
   LayoutDashboard,
   ListChecks,
   MoonStar,
+  PanelLeftClose,
+  PanelLeftOpen,
   RefreshCw,
   Settings2,
   Sparkles,
@@ -112,6 +114,10 @@ const phaseLabels: Record<string, string> = {
   fail: "Fail",
 };
 
+const DEFAULT_PLAN_WIDTH = 360;
+const MIN_PLAN_WIDTH = 280;
+const MAX_PLAN_WIDTH = 560;
+
 function formatKstTime(value: string) {
   const date = new Date(value);
   const parts = new Intl.DateTimeFormat("en-GB", {
@@ -147,6 +153,8 @@ export function DashboardApp({
   initialSnapshot: DashboardSnapshot;
 }) {
   const [snapshot, setSnapshot] = React.useState(initialSnapshot);
+  const [planOpen, setPlanOpen] = React.useState(true);
+  const [planWidth, setPlanWidth] = React.useState(DEFAULT_PLAN_WIDTH);
 
   const refresh = React.useCallback(async () => {
     const response = await fetch("/api/dashboard/snapshot", {
@@ -182,6 +190,36 @@ export function DashboardApp({
     await refresh();
   }
 
+  function openPlanSidebar() {
+    setPlanWidth(DEFAULT_PLAN_WIDTH);
+    setPlanOpen(true);
+  }
+
+  function closePlanSidebar() {
+    setPlanOpen(false);
+  }
+
+  function startPlanResize(event: React.PointerEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = planWidth;
+
+    const move = (moveEvent: PointerEvent) => {
+      const next = Math.min(
+        MAX_PLAN_WIDTH,
+        Math.max(MIN_PLAN_WIDTH, startWidth + moveEvent.clientX - startX)
+      );
+      setPlanWidth(next);
+    };
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+    };
+
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop);
+  }
+
   const doingCards = snapshot.cards.filter((card) => card.status === "doing");
   return (
     <main className="flex min-h-screen flex-col bg-background text-foreground">
@@ -190,7 +228,7 @@ export function DashboardApp({
           <LayoutDashboard className="size-5 text-accent-cyan" />
           <div className="min-w-0">
             <h1 className="truncate text-sm font-semibold">
-              My Project Dashboard
+              Vibe with Dashboard
             </h1>
             <p className="truncate font-mono text-[11px] text-muted-foreground">
               {snapshot.launch.dashboardUrl}
@@ -206,9 +244,27 @@ export function DashboardApp({
           />
           <StatusPill
             icon={<Bot className="size-3.5" />}
-            label="$codex-dashboard"
+            label="$vibe-with-dashboard"
             tone="good"
           />
+          {!planOpen && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={openPlanSidebar}
+                    aria-label="Plan 열기"
+                  >
+                    <PanelLeftOpen className="size-4" />
+                  </Button>
+                }
+              />
+              <TooltipContent>Plan 열기</TooltipContent>
+            </Tooltip>
+          )}
           <Tooltip>
             <TooltipTrigger
               render={
@@ -239,7 +295,7 @@ export function DashboardApp({
               <SheetHeader className="border-b border-border">
                 <SheetTitle>Activity Timeline</SheetTitle>
                 <SheetDescription>
-                  Codex 작업 단계와 dashboard 기록.
+                  Agent 작업 단계와 dashboard 기록.
                 </SheetDescription>
               </SheetHeader>
               <ScrollArea className="min-h-0 flex-1">
@@ -276,23 +332,69 @@ export function DashboardApp({
         </div>
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[minmax(330px,0.72fr)_minmax(680px,1.28fr)]">
-        <section className="min-h-0 border-b border-border xl:border-r xl:border-b-0">
+      <div className="flex min-h-0 flex-1">
+        {planOpen ? (
+          <section
+            data-testid="plan-sidebar"
+            className="relative min-h-0 shrink-0 border-r border-border bg-background"
+            style={{ width: planWidth }}
+          >
           <PanelHeader
             icon={<Workflow className="size-4" />}
             title="Plan"
-            meta={`${snapshot.goals.length} goals`}
+            meta={snapshot.board.isEmpty ? "empty" : `${snapshot.goals.length} goals`}
+            action={
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={closePlanSidebar}
+                      aria-label="Plan 접기"
+                    >
+                      <PanelLeftClose className="size-4" />
+                    </Button>
+                  }
+                />
+                <TooltipContent>Plan 접기</TooltipContent>
+              </Tooltip>
+            }
           />
           <ScrollArea className="h-[calc(100vh-7.5rem)]">
             <PlanPanel snapshot={snapshot} />
           </ScrollArea>
-        </section>
+          </section>
+        ) : (
+          <button
+            type="button"
+            onClick={openPlanSidebar}
+            className="flex w-11 shrink-0 items-center justify-center border-r border-border bg-muted/10 text-muted-foreground hover:bg-muted/20 hover:text-foreground"
+            aria-label="Plan 열기"
+          >
+            <PanelLeftOpen className="size-4" />
+          </button>
+        )}
 
-        <section className="min-h-0 border-b border-border xl:border-r xl:border-b-0">
+        {planOpen && (
+          <button
+            type="button"
+            aria-label="Plan 폭 조절"
+            onPointerDown={startPlanResize}
+            className="z-10 w-1 shrink-0 cursor-col-resize bg-transparent hover:bg-accent-cyan/40 focus-visible:bg-accent-cyan/50 focus-visible:outline-none"
+          />
+        )}
+
+        <section className="min-w-0 flex-1 border-b border-border xl:border-b-0">
           <PanelHeader
             icon={<SquareKanban className="size-4" />}
             title="Kanban"
-            meta="현재 처리 지점 + 세로 실행 단계"
+            meta={
+              snapshot.board.archiveReady
+                ? "archive ready"
+                : "현재 처리 지점 + 세로 실행 단계"
+            }
           />
           <ScrollArea className="h-[calc(100vh-7.5rem)]">
             <div className="space-y-4 p-4">
@@ -312,10 +414,12 @@ function PanelHeader({
   icon,
   title,
   meta,
+  action,
 }: {
   icon: React.ReactNode;
   title: string;
   meta: string;
+  action?: React.ReactNode;
 }) {
   return (
     <div className="flex h-12 items-center gap-2 border-b border-border px-4">
@@ -324,6 +428,7 @@ function PanelHeader({
       <span className="ml-auto truncate font-mono text-[11px] text-muted-foreground">
         {meta}
       </span>
+      {action}
     </div>
   );
 }
@@ -355,8 +460,51 @@ function StatusPill({
 }
 
 function PlanPanel({ snapshot }: { snapshot: DashboardSnapshot }) {
+  if (snapshot.goals.length === 0) {
+    return (
+      <div className="space-y-4 p-4">
+        <section className="rounded-md border border-border bg-muted/15 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold">활성 계획 없음</h2>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                `$vibe-with-dashboard plan --task ...`가 실행되면 현재 작업의
+                goal, milestone, card가 여기에 나타난다.
+              </p>
+            </div>
+            <Badge variant="outline">empty</Badge>
+          </div>
+        </section>
+        <section className="rounded-md border border-border bg-background p-3">
+          <div className="text-xs font-semibold">Archive</div>
+          <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+            완료된 board는 archive 후 active board에서 사라진다.
+          </p>
+          <Badge variant="secondary" className="mt-3">
+            {snapshot.archives.length} archived
+          </Badge>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4 p-4">
+      <section className="rounded-md border border-border bg-muted/15 p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="truncate text-sm font-semibold">
+              {snapshot.board.title}
+            </h2>
+            <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
+              {snapshot.board.task || "현재 board task 없음"}
+            </p>
+          </div>
+          <Badge variant={snapshot.board.archiveReady ? "default" : "outline"}>
+            {snapshot.board.archiveReady ? "archive ready" : snapshot.board.status}
+          </Badge>
+        </div>
+      </section>
       {snapshot.goals.map((goal) => (
         <section key={goal.id} className="space-y-3">
           <div className="rounded-md border border-border bg-muted/15 p-3">
@@ -433,9 +581,9 @@ function CurrentWorkVisual({ snapshot }: { snapshot: DashboardSnapshot }) {
             현재 처리 지점
           </div>
           <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-            {latest
+      {latest
               ? latest.message
-              : "아직 기록된 activity가 없다. $codex-dashboard 작업이 시작되면 여기에 표시된다."}
+              : "아직 기록된 activity가 없다. $vibe-with-dashboard 작업이 시작되면 여기에 표시된다."}
           </p>
         </div>
         <div className="flex flex-wrap gap-1">
@@ -917,7 +1065,7 @@ function HarnessPanel({ snapshot }: { snapshot: DashboardSnapshot }) {
   return (
     <div className="space-y-4">
       <div className="rounded-md border border-border bg-muted/10 p-3">
-        <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
+          <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
           <Code2 className="size-4 text-accent-cyan" />
           Launch
         </div>

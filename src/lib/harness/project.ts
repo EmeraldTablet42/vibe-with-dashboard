@@ -1,6 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import { getProjectRoot } from "@/lib/project-root";
+
 type SkillFrontmatter = {
   name?: string;
   description?: string;
@@ -25,12 +27,12 @@ async function readIfExists(filePath: string) {
 
 function normalizePath(filePath: string) {
   return path
-    .relative(/*turbopackIgnore: true*/ process.cwd(), filePath)
+    .relative(getProjectRoot(), filePath)
     .replaceAll("\\", "/");
 }
 
 function workspacePath(...segments: string[]) {
-  return path.join(/*turbopackIgnore: true*/ process.cwd(), ...segments);
+  return path.join(getProjectRoot(), ...segments);
 }
 
 function parseFrontmatter(markdown: string): SkillFrontmatter {
@@ -95,6 +97,7 @@ export async function getProjectHarnessInventory() {
         const skillDir = path.join(skillsRoot, entry.name);
         const skillPath = path.join(skillDir, "SKILL.md");
         const markdown = await readIfExists(skillPath);
+        if (!markdown) return null;
         const frontmatter = parseFrontmatter(markdown);
         const references = await fs
           .readdir(path.join(skillDir, "references"))
@@ -115,11 +118,14 @@ export async function getProjectHarnessInventory() {
         };
       })
   );
+  const presentSkills = skills.filter(
+    (skill): skill is NonNullable<(typeof skills)[number]> => skill !== null
+  );
 
   const configFiles = await Promise.all(
     [
       "AGENTS.md",
-      "my_project_dashboard.md",
+      "vibe_with_dashboard.md",
       ".codex/config.example.toml",
       ".codex/config.toml",
     ].map(async (relativePath) => ({
@@ -143,7 +149,7 @@ export async function getProjectHarnessInventory() {
   );
 
   return {
-    skills,
+    skills: presentSkills,
     mcpServers,
     configFiles,
   };

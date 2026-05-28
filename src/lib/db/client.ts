@@ -5,8 +5,9 @@ import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 
 import * as schema from "@/lib/db/schema";
+import { getProjectRoot } from "@/lib/project-root";
 
-const SCHEMA_VERSION = "monitoring-v1";
+const SCHEMA_VERSION = "vibe-dashboard-v1";
 
 type SqliteDatabase = Database.Database;
 type DrizzleDatabase = ReturnType<typeof drizzle<typeof schema>>;
@@ -16,7 +17,7 @@ let db: DrizzleDatabase | null = null;
 let initialized = false;
 
 export function getDashboardDir() {
-  return path.resolve(process.cwd(), ".dashboard");
+  return path.join(getProjectRoot(), ".dashboard");
 }
 
 export function getDatabasePath() {
@@ -79,6 +80,8 @@ function resetLegacySchemaIfNeeded() {
     DROP TABLE IF EXISTS cards;
     DROP TABLE IF EXISTS milestones;
     DROP TABLE IF EXISTS goals;
+    DROP TABLE IF EXISTS board_archives;
+    DROP TABLE IF EXISTS boards;
     DROP TABLE IF EXISTS design_tokens;
     DROP TABLE IF EXISTS harness_profiles;
     DROP TABLE IF EXISTS subagents;
@@ -93,8 +96,28 @@ export function initializeDatabase() {
   resetLegacySchemaIfNeeded();
 
   getSqlite().exec(`
+    CREATE TABLE IF NOT EXISTS boards (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      task TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      archived_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS board_archives (
+      id TEXT PRIMARY KEY,
+      board_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      task TEXT NOT NULL DEFAULT '',
+      snapshot_json TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS goals (
       id TEXT PRIMARY KEY,
+      board_id TEXT NOT NULL REFERENCES boards(id),
       title TEXT NOT NULL,
       summary TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'active',
@@ -106,6 +129,7 @@ export function initializeDatabase() {
 
     CREATE TABLE IF NOT EXISTS milestones (
       id TEXT PRIMARY KEY,
+      board_id TEXT NOT NULL REFERENCES boards(id),
       goal_id TEXT NOT NULL REFERENCES goals(id),
       title TEXT NOT NULL,
       summary TEXT NOT NULL,
@@ -119,6 +143,7 @@ export function initializeDatabase() {
 
     CREATE TABLE IF NOT EXISTS cards (
       id TEXT PRIMARY KEY,
+      board_id TEXT NOT NULL REFERENCES boards(id),
       milestone_id TEXT NOT NULL REFERENCES milestones(id),
       title TEXT NOT NULL,
       summary TEXT NOT NULL,
@@ -137,8 +162,9 @@ export function initializeDatabase() {
 
     CREATE TABLE IF NOT EXISTS activity_entries (
       id TEXT PRIMARY KEY,
+      board_id TEXT NOT NULL REFERENCES boards(id),
       phase TEXT NOT NULL,
-      source TEXT NOT NULL DEFAULT 'codex',
+      source TEXT NOT NULL DEFAULT 'agent',
       status TEXT NOT NULL DEFAULT 'done',
       task TEXT NOT NULL DEFAULT '',
       title TEXT NOT NULL,
@@ -149,7 +175,8 @@ export function initializeDatabase() {
 
     CREATE TABLE IF NOT EXISTS agent_checkpoints (
       id TEXT PRIMARY KEY,
-      agent TEXT NOT NULL DEFAULT 'codex',
+      board_id TEXT NOT NULL REFERENCES boards(id),
+      agent TEXT NOT NULL DEFAULT 'agent',
       task TEXT NOT NULL DEFAULT '',
       status TEXT NOT NULL DEFAULT 'active',
       summary TEXT NOT NULL,
@@ -182,7 +209,7 @@ export function initializeDatabase() {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       description TEXT NOT NULL,
-      model TEXT NOT NULL DEFAULT 'gpt-5-codex',
+      model TEXT NOT NULL DEFAULT 'agent-default',
       reasoning_effort TEXT NOT NULL DEFAULT 'medium',
       sandbox TEXT NOT NULL DEFAULT 'read-only',
       tools_json TEXT NOT NULL DEFAULT '[]',
@@ -197,12 +224,19 @@ export function initializeDatabase() {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE INDEX IF NOT EXISTS boards_status_idx ON boards(status);
+    CREATE INDEX IF NOT EXISTS board_archives_created_idx ON board_archives(created_at);
+    CREATE INDEX IF NOT EXISTS goals_board_idx ON goals(board_id);
+    CREATE INDEX IF NOT EXISTS milestones_board_idx ON milestones(board_id);
     CREATE INDEX IF NOT EXISTS milestones_goal_idx ON milestones(goal_id);
+    CREATE INDEX IF NOT EXISTS cards_board_idx ON cards(board_id);
     CREATE INDEX IF NOT EXISTS cards_milestone_idx ON cards(milestone_id);
     CREATE INDEX IF NOT EXISTS cards_status_idx ON cards(status);
     CREATE INDEX IF NOT EXISTS cards_priority_idx ON cards(priority);
+    CREATE INDEX IF NOT EXISTS activity_board_idx ON activity_entries(board_id);
     CREATE INDEX IF NOT EXISTS activity_created_idx ON activity_entries(created_at);
     CREATE INDEX IF NOT EXISTS activity_phase_idx ON activity_entries(phase);
+    CREATE INDEX IF NOT EXISTS checkpoints_board_idx ON agent_checkpoints(board_id);
     CREATE INDEX IF NOT EXISTS checkpoints_agent_idx ON agent_checkpoints(agent);
     CREATE INDEX IF NOT EXISTS checkpoints_created_idx ON agent_checkpoints(created_at);
   `);

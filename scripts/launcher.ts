@@ -3,16 +3,19 @@ import path from "node:path";
 
 import { addActivity, upsertSetting } from "../src/lib/db/queries";
 import { ensureSeedData } from "../src/lib/db/seed";
+import { getAppRoot, getProjectRoot } from "../src/lib/project-root";
 
 const host = "127.0.0.1";
 const port = Number(process.env.DASHBOARD_PORT ?? process.env.PORT ?? 3000);
 const dashboardUrl = `http://${host}:${port}`;
+const appRoot = getAppRoot();
+const projectRoot = getProjectRoot();
 let child: ChildProcess | null = null;
 
 function getNextCommand() {
   return process.platform === "win32"
-    ? path.join(process.cwd(), "node_modules", ".bin", "next.cmd")
-    : path.join(process.cwd(), "node_modules", ".bin", "next");
+    ? path.join(appRoot, "node_modules", ".bin", "next.cmd")
+    : path.join(appRoot, "node_modules", ".bin", "next");
 }
 
 function startNext() {
@@ -32,7 +35,7 @@ function startNext() {
       : ["dev", "--turbopack", "--hostname", host, "--port", String(port)];
 
   child = spawn(command, args, {
-    cwd: process.cwd(),
+    cwd: appRoot,
     env: { ...process.env, DASHBOARD_PORT: String(port), PORT: String(port) },
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
@@ -82,11 +85,11 @@ addActivity({
   task: "server",
   title: "Dashboard server online",
   message: dashboardUrl,
-  metadata: { port },
+  metadata: { port, projectRoot },
 });
 
 startNext();
-console.log(`[launcher] dashboard ${dashboardUrl}`);
+console.log(`[launcher] dashboard ${dashboardUrl} project=${projectRoot}`);
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, stop);

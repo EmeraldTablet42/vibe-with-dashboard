@@ -15,6 +15,7 @@ export type DashboardEventPayload = {
   kind:
     | "snapshot"
     | "activity"
+    | "board"
     | "checkpoint"
     | "card"
     | "goal"

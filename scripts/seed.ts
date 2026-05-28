@@ -5,6 +5,7 @@ console.log(
   JSON.stringify(
     {
       seeded: true,
+      boards: summary.boards.length,
       goals: summary.goals.length,
       activities: summary.activities.length,
     },

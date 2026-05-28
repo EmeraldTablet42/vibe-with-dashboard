@@ -4,10 +4,15 @@ const http = require("node:http");
 const net = require("node:net");
 const path = require("node:path");
 
-const root = process.cwd();
+const projectRoot = path.resolve(
+  process.env.VIBE_DASHBOARD_PROJECT_ROOT || process.cwd()
+);
+const appRoot = path.resolve(
+  process.env.VIBE_DASHBOARD_APP_ROOT || process.cwd()
+);
 const host = "127.0.0.1";
-const appId = "codex-dashboard";
-const stateDir = path.join(root, ".dashboard");
+const appId = "vibe-with-dashboard";
+const stateDir = path.join(projectRoot, ".dashboard");
 const statePath = path.join(stateDir, "state.json");
 const startPort = Number(process.env.DASHBOARD_PORT || process.env.PORT || 3000);
 const maxPort = startPort + 40;
@@ -48,18 +53,18 @@ function readState() {
 function ensureDependencies() {
   const tsxBin =
     process.platform === "win32"
-      ? path.join(root, "node_modules", ".bin", "tsx.cmd")
-      : path.join(root, "node_modules", ".bin", "tsx");
+      ? path.join(appRoot, "node_modules", ".bin", "tsx.cmd")
+      : path.join(appRoot, "node_modules", ".bin", "tsx");
   const nextBin =
     process.platform === "win32"
-      ? path.join(root, "node_modules", ".bin", "next.cmd")
-      : path.join(root, "node_modules", ".bin", "next");
+      ? path.join(appRoot, "node_modules", ".bin", "next.cmd")
+      : path.join(appRoot, "node_modules", ".bin", "next");
 
   if (exists(tsxBin) && exists(nextBin)) return;
 
   log("dependencies missing; running npm install");
   const result = spawnSync("npm", ["install"], {
-    cwd: root,
+    cwd: appRoot,
     stdio: "inherit",
     shell: process.platform === "win32",
   });
@@ -131,7 +136,7 @@ function isSameDashboard(health) {
   return (
     health.ok &&
     health.json?.appId === appId &&
-    normalize(health.json?.projectRoot || "") === normalize(root)
+    normalize(health.json?.projectRoot || "") === normalize(projectRoot)
   );
 }
 
@@ -139,7 +144,7 @@ function runPowerShell(script) {
   const result = spawnSync(
     "powershell.exe",
     ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
-    { cwd: root, encoding: "utf8", windowsHide: true }
+    { cwd: projectRoot, encoding: "utf8", windowsHide: true }
   );
   return `${result.stdout || ""}${result.stderr || ""}`.trim();
 }
@@ -153,20 +158,26 @@ function getPortOwnerPid(port) {
   return Number.isFinite(pid) && pid > 0 ? pid : null;
 }
 
-function isProjectProcess(pid) {
+function isDashboardProcess(pid) {
   if (process.platform !== "win32") return false;
-  const escapedRoot = root.replaceAll("'", "''");
   const commandLine = runPowerShell(
     `(Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}").CommandLine`
   );
-  return commandLine.toLowerCase().includes(escapedRoot.toLowerCase());
+  const lower = commandLine.toLowerCase();
+  return (
+    (lower.includes(appRoot.toLowerCase()) ||
+      lower.includes(projectRoot.toLowerCase())) &&
+    (lower.includes("vibe-with-dashboard") ||
+      lower.includes(".vibe-with-dashboard") ||
+      lower.includes("dashboard"))
+  );
 }
 
 function stopProcessTree(pid) {
   if (!pid) return;
   if (process.platform === "win32") {
     spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], {
-      cwd: root,
+      cwd: projectRoot,
       stdio: "ignore",
       windowsHide: true,
     });
@@ -184,7 +195,8 @@ function writeState(port, pid, reused) {
   const url = `http://${host}:${port}`;
   const state = {
     appId,
-    projectRoot: root,
+    projectRoot,
+    appRoot,
     port,
     url,
     pid: pid ?? null,
@@ -222,12 +234,14 @@ function startLauncher(port) {
       : ["run", "dashboard"];
 
   const child = spawn(command, args, {
-    cwd: root,
+    cwd: appRoot,
     detached: true,
     env: {
       ...process.env,
       DASHBOARD_PORT: String(port),
       PORT: String(port),
+      VIBE_DASHBOARD_APP_ROOT: appRoot,
+      VIBE_DASHBOARD_PROJECT_ROOT: projectRoot,
     },
     stdio: ["ignore", out, err],
     windowsHide: true,
@@ -280,7 +294,7 @@ async function chooseDashboard() {
 
     if (occupied) {
       const pid = getPortOwnerPid(port);
-      if (pid && isProjectProcess(pid)) {
+      if (pid && isDashboardProcess(pid)) {
         log(`port ${port} has a stale project dashboard; stopping pid=${pid}`);
         stopProcessTree(pid);
         await sleep(1_200);

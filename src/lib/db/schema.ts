@@ -1,25 +1,68 @@
 import { sql } from "drizzle-orm";
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
-export const goals = sqliteTable("goals", {
-  id: text("id").primaryKey(),
-  title: text("title").notNull(),
-  summary: text("summary").notNull(),
-  status: text("status").notNull().default("active"),
-  priority: text("priority").notNull().default("medium"),
-  position: integer("position").notNull().default(0),
-  createdAt: text("created_at")
-    .notNull()
-    .default(sql`(datetime('now'))`),
-  updatedAt: text("updated_at")
-    .notNull()
-    .default(sql`(datetime('now'))`),
-});
+export const boards = sqliteTable(
+  "boards",
+  {
+    id: text("id").primaryKey(),
+    title: text("title").notNull(),
+    task: text("task").notNull().default(""),
+    status: text("status").notNull().default("active"),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text("updated_at")
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    archivedAt: text("archived_at"),
+  },
+  (table) => [index("boards_status_idx").on(table.status)]
+);
+
+export const boardArchives = sqliteTable(
+  "board_archives",
+  {
+    id: text("id").primaryKey(),
+    boardId: text("board_id").notNull(),
+    title: text("title").notNull(),
+    task: text("task").notNull().default(""),
+    snapshotJson: text("snapshot_json").notNull(),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => [index("board_archives_created_idx").on(table.createdAt)]
+);
+
+export const goals = sqliteTable(
+  "goals",
+  {
+    id: text("id").primaryKey(),
+    boardId: text("board_id")
+      .notNull()
+      .references(() => boards.id),
+    title: text("title").notNull(),
+    summary: text("summary").notNull(),
+    status: text("status").notNull().default("active"),
+    priority: text("priority").notNull().default("medium"),
+    position: integer("position").notNull().default(0),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text("updated_at")
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => [index("goals_board_idx").on(table.boardId)]
+);
 
 export const milestones = sqliteTable(
   "milestones",
   {
     id: text("id").primaryKey(),
+    boardId: text("board_id")
+      .notNull()
+      .references(() => boards.id),
     goalId: text("goal_id")
       .notNull()
       .references(() => goals.id),
@@ -36,13 +79,19 @@ export const milestones = sqliteTable(
       .notNull()
       .default(sql`(datetime('now'))`),
   },
-  (table) => [index("milestones_goal_idx").on(table.goalId)]
+  (table) => [
+    index("milestones_board_idx").on(table.boardId),
+    index("milestones_goal_idx").on(table.goalId),
+  ]
 );
 
 export const cards = sqliteTable(
   "cards",
   {
     id: text("id").primaryKey(),
+    boardId: text("board_id")
+      .notNull()
+      .references(() => boards.id),
     milestoneId: text("milestone_id")
       .notNull()
       .references(() => milestones.id),
@@ -65,6 +114,7 @@ export const cards = sqliteTable(
       .default(sql`(datetime('now'))`),
   },
   (table) => [
+    index("cards_board_idx").on(table.boardId),
     index("cards_milestone_idx").on(table.milestoneId),
     index("cards_status_idx").on(table.status),
     index("cards_priority_idx").on(table.priority),
@@ -75,8 +125,11 @@ export const activityEntries = sqliteTable(
   "activity_entries",
   {
     id: text("id").primaryKey(),
+    boardId: text("board_id")
+      .notNull()
+      .references(() => boards.id),
     phase: text("phase").notNull(),
-    source: text("source").notNull().default("codex"),
+    source: text("source").notNull().default("agent"),
     status: text("status").notNull().default("done"),
     task: text("task").notNull().default(""),
     title: text("title").notNull(),
@@ -87,6 +140,7 @@ export const activityEntries = sqliteTable(
       .default(sql`(datetime('now'))`),
   },
   (table) => [
+    index("activity_board_idx").on(table.boardId),
     index("activity_created_idx").on(table.createdAt),
     index("activity_phase_idx").on(table.phase),
   ]
@@ -96,7 +150,10 @@ export const agentCheckpoints = sqliteTable(
   "agent_checkpoints",
   {
     id: text("id").primaryKey(),
-    agent: text("agent").notNull().default("codex"),
+    boardId: text("board_id")
+      .notNull()
+      .references(() => boards.id),
+    agent: text("agent").notNull().default("agent"),
     task: text("task").notNull().default(""),
     status: text("status").notNull().default("active"),
     summary: text("summary").notNull(),
@@ -106,6 +163,7 @@ export const agentCheckpoints = sqliteTable(
       .default(sql`(datetime('now'))`),
   },
   (table) => [
+    index("checkpoints_board_idx").on(table.boardId),
     index("checkpoints_agent_idx").on(table.agent),
     index("checkpoints_created_idx").on(table.createdAt),
   ]
@@ -140,7 +198,7 @@ export const subagents = sqliteTable("subagents", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   description: text("description").notNull(),
-  model: text("model").notNull().default("gpt-5-codex"),
+  model: text("model").notNull().default("agent-default"),
   reasoningEffort: text("reasoning_effort").notNull().default("medium"),
   sandbox: text("sandbox").notNull().default("read-only"),
   toolsJson: text("tools_json").notNull().default("[]"),
