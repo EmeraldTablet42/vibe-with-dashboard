@@ -38,6 +38,10 @@ yarn-error.log*
 # local dashboard state
 .dashboard/
 .vibe-with-dashboard/
+.agents/skills/vibe-with-dashboard/.next/
+.agents/skills/vibe-with-dashboard/node_modules/
+skills/vibe-with-dashboard/.next/
+skills/vibe-with-dashboard/node_modules/
 .codex/config.toml
 
 # vercel

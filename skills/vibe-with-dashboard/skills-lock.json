@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "vibe-with-dashboard": {
+      "source": "EmeraldTablet42/vibe-with-dashboard",
+      "sourceType": "github",
+      "skillPath": "skills/vibe-with-dashboard/SKILL.md",
+      "computedHash": "175b4b3379c5b14809ab456bc4708ae18ee5eef61a937192a1a5828f8d628199"
+    }
+  }
+}
