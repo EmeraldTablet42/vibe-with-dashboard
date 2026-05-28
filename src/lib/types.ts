@@ -10,10 +10,14 @@ export type ActivityPhase =
   | "result"
   | "fail";
 export type ActivityStatus = "active" | "done" | "failed";
+export type DuckSuggestionPriority = "high" | "medium" | "low";
 
 export type LocalizedText = {
+  keyword?: string;
   title?: string;
   summary?: string;
+  detail?: string;
+  actionPrompt?: string;
   task?: string;
   message?: string;
   acceptanceCriteria?: string;
@@ -28,7 +32,8 @@ export type DashboardEventPayload = {
     | "checkpoint"
     | "card"
     | "goal"
-    | "milestone";
+    | "milestone"
+    | "duck-suggestion";
   id?: string;
   message?: string;
 };

@@ -4,7 +4,7 @@ Local monitoring dashboard for LLM agent work.
 
 Vibe with Dashboard keeps your project plan, Kanban board, current processing state, repo snapshot, skills, and agent activity visible while the actual work stays in your coding agent.
 
-No prompt box. No agent command queue. Just a local display board for vibe coding.
+No prompt box. No agent command queue. Just a local display board for vibe coding, with a Rubber Duck for agent-written suggestions.
 
 Install • Use • What You Get • Agent Support • [Full install guide](./INSTALL.md)
 
@@ -69,8 +69,15 @@ Manual commands:
 vibe-with-dashboard ensure
 vibe-with-dashboard plan --task "Implement onboarding"
 vibe-with-dashboard plan --task "Implement onboarding" --translations '{"ko":{"title":"온보딩 구현","task":"온보딩 구현"}}'
+vibe-with-dashboard suggest --suggestion-json '{"keyword":"Tests","title":"Add coverage","actionPrompt":"Add tests for the current change."}'
 vibe-with-dashboard activity --phase implement --message "Core UI updated"
 vibe-with-dashboard archive
+```
+
+Rubber Duck suggestion-json example:
+
+```bash
+vibe-with-dashboard suggest --suggestion-json '{"keyword":"Docs","title":"Tighten setup docs","summary":"Clarify the install path.","detail":"The README should show the shortest project-local install and verify flow.","actionPrompt":"Review README.md and INSTALL.md for any unclear setup steps.","priority":"medium"}'
 ```
 
 Project-local fallback, always available after the one-line install:
@@ -91,6 +98,7 @@ node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js archive
 | Current state | Active phase, focus card, and progress rail. |
 | Activity sheet | Agent activity timeline, hidden until toggled. |
 | Inspector | Repo, GitHub, design tokens, harness files, skills, MCP, subagents. |
+| Rubber Duck | Floating generated duck icon with unread suggestion badge, keyword chips, and copyable action prompts. |
 | Archive | Finished boards are stored, then the active board clears. |
 | Locale | English by default, Korean supported, unsupported locales fall back to English. Agent-supplied Plan/Kanban translations are shown when available. |
 
@@ -117,7 +125,8 @@ Full matrix and flags live in [INSTALL.md](./INSTALL.md).
 2. Installer drops the skill into `.agents/skills/vibe-with-dashboard`.
 3. The skill tells your agent to start or reuse the local dashboard.
 4. The agent records task-level plan and activity events while it works.
-5. Completed boards can be archived, then the active board returns to empty.
+5. The agent can write 3-5 Rubber Duck suggestions for the active board.
+6. Completed boards can be archived, then the active board returns to empty.
 
 ## Development
 

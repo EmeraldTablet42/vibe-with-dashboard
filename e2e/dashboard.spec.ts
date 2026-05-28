@@ -4,6 +4,9 @@ test("English monitoring shell loads with archive and folded panels", async ({
   page,
 }) => {
   const consoleErrors: string[] = [];
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
+    origin: "http://127.0.0.1:3100",
+  });
   page.on("console", (message) => {
     if (message.type() !== "error") return;
     consoleErrors.push(message.text());
@@ -93,6 +96,92 @@ test("English monitoring shell loads with archive and folded panels", async ({
   await expect(page.getByPlaceholder(/Codex/)).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Run" })).toHaveCount(0);
 
+  await expect(page.getByTestId("rubber-duck")).toBeVisible();
+  await expect(page.locator("audio")).toHaveCount(0);
+  const duckAsset = await page.evaluate(async () => {
+    const blob = await fetch("/rubber-duck/rubber-duck-2d5.png").then((response) =>
+      response.blob()
+    );
+    const image = await createImageBitmap(blob);
+    const canvas = document.createElement("canvas");
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) throw new Error("Canvas context unavailable");
+    context.drawImage(image, 0, 0);
+    const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    const cornerIndexes = [
+      0,
+      canvas.width - 1,
+      (canvas.height - 1) * canvas.width,
+      canvas.width * canvas.height - 1,
+    ];
+    let borderTransparent = 0;
+    let borderTotal = 0;
+    let nonTransparent = 0;
+    for (let y = 0; y < canvas.height; y += 1) {
+      for (let x = 0; x < canvas.width; x += 1) {
+        const alpha = data[(y * canvas.width + x) * 4 + 3];
+        if (alpha > 0) nonTransparent += 1;
+        if (
+          x < 4 ||
+          y < 4 ||
+          x >= canvas.width - 4 ||
+          y >= canvas.height - 4
+        ) {
+          borderTotal += 1;
+          if (alpha === 0) borderTransparent += 1;
+        }
+      }
+    }
+    return {
+      cornerAlpha: cornerIndexes.map((index) => data[index * 4 + 3]),
+      borderTransparentRatio: borderTransparent / borderTotal,
+      nonTransparent,
+    };
+  });
+  expect(duckAsset.cornerAlpha).toEqual([0, 0, 0, 0]);
+  expect(duckAsset.borderTransparentRatio).toBe(1);
+  expect(duckAsset.nonTransparent).toBeGreaterThan(1000);
+  await page.request.post("/api/agent/suggestions", {
+    data: {
+      suggestions: [
+        {
+          keyword: "Tests",
+          title: "Add coverage",
+          summary: "Cover the new path.",
+          detail: "A focused test protects the dashboard contract.",
+          actionPrompt: "Add tests for the Rubber Duck suggestion path.",
+          priority: "high",
+        },
+      ],
+    },
+  });
+  await page.reload();
+  await expect(page.getByTestId("duck-unread-badge")).toBeVisible();
+  await page.getByRole("button", { name: "Open duck suggestions" }).click();
+  await expect(page.getByTestId("duck-suggestion-chip")).toHaveText("Tests");
+  await page.getByRole("button", { name: "Open duck suggestions" }).click();
+  await expect(page.getByTestId("duck-suggestion-chip")).toHaveCount(0);
+  await page.getByRole("button", { name: "Open duck suggestions" }).click();
+  await expect(page.getByTestId("duck-suggestion-chip")).toHaveText("Tests");
+  await page.getByTestId("duck-suggestion-chip").click();
+  await expect(page.getByRole("heading", { name: "Add coverage" })).toBeVisible();
+  await expect(page.getByText("A focused test protects the dashboard contract.")).toBeVisible();
+  await page.getByRole("button", { name: "Copy prompt" }).click();
+  await expect(page.getByRole("button", { name: "Copied" })).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe("Add tests for the Rubber Duck suggestion path.");
+  await expect(page.getByTestId("duck-unread-badge")).toHaveCount(0);
+  await page.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "Minimize duck" }).click();
+  await expect(page.getByTestId("rubber-duck-minimized")).toBeVisible();
+  await page.reload();
+  await expect(page.getByTestId("rubber-duck-minimized")).toBeVisible();
+  await page.getByTestId("rubber-duck-minimized").click();
+  await expect(page.getByTestId("rubber-duck")).toBeVisible();
+
   await page.getByRole("button", { name: "Activity" }).click();
   await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
   await expect(page.getByText("Activities")).toBeVisible();
@@ -153,6 +242,29 @@ test("Korean browser locale localizes shell and agent-supplied items", async ({
       ],
     },
   });
+  await context.request.post("/api/agent/suggestions", {
+    data: {
+      suggestions: [
+        {
+          keyword: "Tests",
+          title: "Add coverage",
+          summary: "Cover the new path.",
+          detail: "A focused test protects the dashboard contract.",
+          actionPrompt: "Add tests.",
+          priority: "high",
+          translations: {
+            ko: {
+              keyword: "테스트",
+              title: "커버리지 추가",
+              summary: "새 경로를 검증한다.",
+              detail: "집중 테스트로 대시보드 계약을 보호한다.",
+              actionPrompt: "테스트를 추가해줘.",
+            },
+          },
+        },
+      ],
+    },
+  });
   await page.goto("/");
 
   await expect(page.getByRole("tab", { name: /진행/ })).toBeVisible();
@@ -162,6 +274,10 @@ test("Korean browser locale localizes shell and agent-supplied items", async ({
   ).toBeVisible();
   await expect(page.getByRole("heading", { name: "화면 만들기" })).toBeVisible();
   await expect(page.getByText("현재 작업").first()).toBeVisible();
+  await page.getByRole("button", { name: "러버덕 제안 열기" }).click();
+  await expect(page.getByTestId("duck-suggestion-chip")).toHaveText("테스트");
+  await page.getByTestId("duck-suggestion-chip").click();
+  await expect(page.getByRole("heading", { name: "커버리지 추가" })).toBeVisible();
 
   await context.close();
 });

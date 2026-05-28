@@ -16,6 +16,7 @@ Local, single-user monitoring dashboard for LLM agent work.
 - Record phase-level activity with `vibe-with-dashboard activity`.
 - Use `vibe-with-dashboard plan --task "..."` to populate the active Plan/Kanban board.
 - Include agent-generated `translations` for Plan/Kanban titles and summaries when the user's locale is known.
+- Use `vibe-with-dashboard suggest --suggestion-json "{...}"` to populate Rubber Duck suggestions for the active board.
 - Use `vibe-with-dashboard archive` after all cards are done and result activity is recorded.
 - Do not store private reasoning, credentials, secrets, or long terminal dumps in activity entries.
 - Bind local services to `127.0.0.1`.
@@ -36,6 +37,7 @@ Local, single-user monitoring dashboard for LLM agent work.
 
 - Next.js App Router UI with collapsible/resizable Plan sidebar, vertical Kanban, current processing rail, Activity sheet, and folded Inspector.
 - Browser-locale i18n shell: English default, Korean supported, unsupported locales fall back to English.
+- Floating Rubber Duck suggestions are agent-written, board-scoped, and archived with the board.
 - Dashboard launcher uses production `next start` by default; set `VIBE_DASHBOARD_DEV=1` for dashboard development.
 - SQLite/Drizzle state in the target project `.dashboard/dashboard.sqlite`.
 - SSE stream at `/api/events/stream`.

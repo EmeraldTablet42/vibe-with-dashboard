@@ -151,6 +151,36 @@ export const activityEntries = sqliteTable(
   ]
 );
 
+export const duckSuggestions = sqliteTable(
+  "duck_suggestions",
+  {
+    id: text("id").primaryKey(),
+    boardId: text("board_id")
+      .notNull()
+      .references(() => boards.id),
+    keyword: text("keyword").notNull(),
+    title: text("title").notNull(),
+    summary: text("summary").notNull().default(""),
+    detail: text("detail").notNull().default(""),
+    actionPrompt: text("action_prompt").notNull().default(""),
+    priority: text("priority").notNull().default("medium"),
+    source: text("source").notNull().default("agent"),
+    translationsJson: text("translations_json").notNull().default("{}"),
+    readAt: text("read_at"),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text("updated_at")
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => [
+    index("duck_suggestions_board_idx").on(table.boardId),
+    index("duck_suggestions_read_idx").on(table.readAt),
+    index("duck_suggestions_priority_idx").on(table.priority),
+  ]
+);
+
 export const agentCheckpoints = sqliteTable(
   "agent_checkpoints",
   {

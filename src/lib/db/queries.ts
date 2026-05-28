@@ -11,6 +11,7 @@ import {
   boards,
   cards,
   designTokens,
+  duckSuggestions,
   goals,
   harnessProfiles,
   milestones,
@@ -25,6 +26,7 @@ import type {
   ActivityStatus,
   CardPriority,
   CardStatus,
+  DuckSuggestionPriority,
   GoalStatus,
   LocaleTranslations,
   MilestoneStatus,
@@ -43,6 +45,12 @@ function parseJson<T>(value: string, fallback: T): T {
 function stringifyTranslations(translations?: LocaleTranslations) {
   return JSON.stringify(translations ?? {});
 }
+
+const priorityRank: Record<DuckSuggestionPriority, number> = {
+  high: 0,
+  medium: 1,
+  low: 2,
+};
 
 function compactPatch<T extends Record<string, unknown>>(input: T) {
   return Object.fromEntries(
@@ -136,6 +144,12 @@ function getBoardRows(boardId: string) {
     .orderBy(desc(agentCheckpoints.createdAt))
     .limit(20)
     .all();
+  const suggestionRows = db
+    .select()
+    .from(duckSuggestions)
+    .where(eq(duckSuggestions.boardId, boardId))
+    .orderBy(desc(duckSuggestions.createdAt))
+    .all();
 
   const cardsWithDependencies = cardRows.map((card) => ({
     ...card,
@@ -150,6 +164,7 @@ function getBoardRows(boardId: string) {
     cardsWithDependencies,
     activityRows,
     checkpointRows,
+    suggestionRows,
   };
 }
 
@@ -162,6 +177,7 @@ export async function getDashboardSnapshot() {
     cardsWithDependencies,
     activityRows,
     checkpointRows,
+    suggestionRows,
   } = getBoardRows(activeBoard.id);
 
   const [
@@ -243,6 +259,23 @@ export async function getDashboardSnapshot() {
         {}
       ),
     })),
+    duckSuggestions: suggestionRows
+      .map((suggestion) => ({
+        ...suggestion,
+        translations: parseJson<LocaleTranslations>(
+          suggestion.translationsJson,
+          {}
+        ),
+      }))
+      .sort((a, b) => {
+        if (!a.readAt && b.readAt) return -1;
+        if (a.readAt && !b.readAt) return 1;
+        const priorityDiff =
+          priorityRank[a.priority as DuckSuggestionPriority] -
+          priorityRank[b.priority as DuckSuggestionPriority];
+        if (priorityDiff !== 0) return priorityDiff;
+        return b.createdAt.localeCompare(a.createdAt);
+      }),
     agentCheckpoints: checkpointRows.map((checkpoint) => ({
       ...checkpoint,
       payload: parseJson<Record<string, unknown>>(checkpoint.payloadJson, {}),
@@ -456,6 +489,73 @@ export function upsertPlan(input: {
   return { boardId: board.id };
 }
 
+export function replaceDuckSuggestions(input: {
+  suggestions: Array<{
+    keyword: string;
+    title: string;
+    summary?: string;
+    detail?: string;
+    actionPrompt?: string;
+    priority?: DuckSuggestionPriority;
+    source?: string;
+    translations?: LocaleTranslations;
+  }>;
+  source?: string;
+}) {
+  const board = getActiveBoardRow();
+  const db = getDb();
+  const createdAt = now();
+
+  db.delete(duckSuggestions).where(eq(duckSuggestions.boardId, board.id)).run();
+
+  if (input.suggestions.length === 0) {
+    publishDashboardEvent({
+      kind: "duck-suggestion",
+      id: board.id,
+      message: "cleared",
+    });
+    return { boardId: board.id, count: 0 };
+  }
+
+  db.insert(duckSuggestions)
+    .values(
+      input.suggestions.slice(0, 5).map((suggestion) => ({
+        id: randomUUID(),
+        boardId: board.id,
+        keyword: suggestion.keyword.trim(),
+        title: suggestion.title.trim(),
+        summary: suggestion.summary?.trim() ?? "",
+        detail: suggestion.detail?.trim() ?? "",
+        actionPrompt: suggestion.actionPrompt?.trim() ?? "",
+        priority: suggestion.priority ?? "medium",
+        source: suggestion.source ?? input.source ?? "agent",
+        translationsJson: stringifyTranslations(suggestion.translations),
+        createdAt,
+        updatedAt: createdAt,
+      }))
+    )
+    .run();
+
+  publishDashboardEvent({
+    kind: "duck-suggestion",
+    id: board.id,
+    message: "updated",
+  });
+  return { boardId: board.id, count: Math.min(5, input.suggestions.length) };
+}
+
+export function markDuckSuggestionRead(id: string) {
+  ensureSeedData();
+  const readAt = now();
+  getDb()
+    .update(duckSuggestions)
+    .set({ readAt, updatedAt: readAt })
+    .where(eq(duckSuggestions.id, id))
+    .run();
+  publishDashboardEvent({ kind: "duck-suggestion", id, message: "read" });
+  return { id, readAt };
+}
+
 export function archiveActiveBoard() {
   const board = getActiveBoardRow();
   const {
@@ -464,6 +564,7 @@ export function archiveActiveBoard() {
     cardsWithDependencies,
     activityRows,
     checkpointRows,
+    suggestionRows,
   } = getBoardRows(board.id);
   const hasCards = cardsWithDependencies.length > 0;
   const hasResult = activityRows.some((activity) => activity.phase === "result");
@@ -505,6 +606,13 @@ export function archiveActiveBoard() {
       {}
     ),
   }));
+  const archivedDuckSuggestions = suggestionRows.map((suggestion) => ({
+    ...suggestion,
+    translations: parseJson<LocaleTranslations>(
+      suggestion.translationsJson,
+      {}
+    ),
+  }));
 
   getDb()
     .insert(boardArchives)
@@ -522,6 +630,7 @@ export function archiveActiveBoard() {
         milestones: milestoneRows,
         cards: archivedCards,
         activityEntries: archivedActivities,
+        duckSuggestions: archivedDuckSuggestions,
         agentCheckpoints: checkpointRows,
         archivedAt,
       }),

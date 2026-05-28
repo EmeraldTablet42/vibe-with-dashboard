@@ -9,11 +9,13 @@ import {
   CheckCircle2,
   CircleDot,
   Clock3,
+  Copy,
   GitBranch,
   GitPullRequest,
   GripVertical,
   LayoutDashboard,
   ListChecks,
+  Minimize2,
   MoonStar,
   PanelLeftClose,
   PanelLeftOpen,
@@ -34,6 +36,14 @@ import { CSS } from "@dnd-kit/utilities";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -79,6 +89,7 @@ const statusTone: Record<CardStatus, string> = {
 };
 
 type ArchiveRecord = DashboardSnapshot["archives"][number];
+type DuckSuggestion = DashboardSnapshot["duckSuggestions"][number];
 type ArchiveGoal = Omit<DashboardSnapshot["goals"][number], "milestones"> & {
   milestones?: DashboardSnapshot["goals"][number]["milestones"];
 };
@@ -95,6 +106,7 @@ type ArchivedSnapshot = {
   milestones?: ArchiveMilestone[];
   cards?: DashboardCard[];
   activityEntries?: DashboardActivity[];
+  duckSuggestions?: DuckSuggestion[];
   archivedAt?: string;
 };
 
@@ -332,6 +344,12 @@ export function DashboardApp({
           />
         </TabsContent>
       </Tabs>
+      <RubberDuck
+        locale={locale}
+        messages={m}
+        onRefresh={refresh}
+        suggestions={snapshot.duckSuggestions}
+      />
     </main>
   );
 }
@@ -1086,6 +1104,215 @@ function CardBody({
         </p>
       )}
     </div>
+  );
+}
+
+function RubberDuck({
+  locale,
+  messages,
+  onRefresh,
+  suggestions,
+}: {
+  locale: SupportedLocale;
+  messages: DashboardMessages;
+  onRefresh: () => Promise<void>;
+  suggestions: DuckSuggestion[];
+}) {
+  const [minimized, setMinimized] = React.useState(() =>
+    typeof window === "undefined"
+      ? false
+      : window.localStorage.getItem("vibe-duck-minimized") === "1"
+  );
+  const [chipsVisible, setChipsVisible] = React.useState(false);
+  const [burstKey, setBurstKey] = React.useState(0);
+  const [selected, setSelected] = React.useState<DuckSuggestion | null>(null);
+  const [copied, setCopied] = React.useState(false);
+  const unreadCount = suggestions.filter((suggestion) => !suggestion.readAt).length;
+  const visibleSuggestions = suggestions.slice(0, 5);
+
+  React.useEffect(() => {
+    window.localStorage.setItem("vibe-duck-minimized", minimized ? "1" : "0");
+  }, [minimized]);
+
+  async function openSuggestion(suggestion: DuckSuggestion) {
+    setSelected(suggestion);
+    setCopied(false);
+    if (!suggestion.readAt) {
+      await patchJson(`/api/duck-suggestions/${suggestion.id}`, {});
+      await onRefresh();
+    }
+  }
+
+  async function copyPrompt() {
+    if (!selected) return;
+    const prompt = localizedText(
+      selected,
+      locale,
+      "actionPrompt",
+      selected.actionPrompt || selected.detail || selected.title
+    );
+    await navigator.clipboard.writeText(prompt);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1400);
+  }
+
+  function handleDuckClick() {
+    if (minimized) {
+      setMinimized(false);
+      setChipsVisible(false);
+      setBurstKey((value) => value + 1);
+      return;
+    }
+    setChipsVisible((visible) =>
+      visibleSuggestions.length > 0 ? !visible : false
+    );
+    setBurstKey((value) => value + 1);
+  }
+
+  if (minimized) {
+    return (
+      <button
+        type="button"
+        onClick={handleDuckClick}
+        aria-label={messages.duckOpen}
+        data-testid="rubber-duck-minimized"
+        className="fixed bottom-4 right-4 z-40 flex size-12 items-center justify-center rounded-full border border-border bg-background shadow-lg transition-transform hover:scale-105"
+      >
+        <DuckImage className="size-9 object-contain" />
+        {unreadCount > 0 && <DuckBadge count={unreadCount} />}
+      </button>
+    );
+  }
+
+  return (
+    <div
+      className="fixed bottom-4 right-4 z-40 flex flex-col items-end gap-2"
+      data-testid="rubber-duck"
+    >
+      {chipsVisible && visibleSuggestions.length > 0 && (
+        <div className="flex max-w-[min(22rem,calc(100vw-2rem))] flex-col items-end gap-2">
+          {visibleSuggestions.map((suggestion, index) => (
+            <button
+              key={`${suggestion.id}-${burstKey}`}
+              type="button"
+              onClick={() => openSuggestion(suggestion)}
+              data-testid="duck-suggestion-chip"
+              className="duck-chip rounded-full border border-border bg-popover px-3 py-2 text-left text-xs font-medium text-popover-foreground shadow-lg transition-colors hover:border-accent-cyan hover:bg-accent-cyan/10"
+              style={
+                {
+                  "--duck-chip-index": index,
+                } as React.CSSProperties
+              }
+            >
+              <span className="flex items-center gap-2">
+                {!suggestion.readAt && (
+                  <span className="size-1.5 rounded-full bg-risk-high" />
+                )}
+                {localizedText(
+                  suggestion,
+                  locale,
+                  "keyword",
+                  suggestion.keyword
+                )}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="relative">
+        <button
+          key={`duck-${burstKey}`}
+          type="button"
+          onClick={handleDuckClick}
+          aria-label={messages.duckOpen}
+          className="duck-quack flex size-20 items-center justify-center rounded-2xl border border-border bg-background/95 p-2 shadow-xl backdrop-blur transition-transform hover:scale-[1.03]"
+        >
+          <DuckImage className="size-16 object-contain" />
+          {unreadCount > 0 && <DuckBadge count={unreadCount} />}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setMinimized(true);
+            setChipsVisible(false);
+          }}
+          aria-label={messages.duckMinimize}
+          className="absolute -bottom-1 -right-1 flex size-7 items-center justify-center rounded-full border border-border bg-background text-muted-foreground shadow-md hover:text-foreground"
+        >
+          <Minimize2 className="size-3.5" />
+        </button>
+      </div>
+
+      <Dialog open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)}>
+        <DialogContent className="sm:max-w-xl">
+          {selected && (
+            <>
+              <DialogHeader>
+                <DialogTitle>
+                  {localizedText(selected, locale, "title", selected.title)}
+                </DialogTitle>
+                <DialogDescription>
+                  {localizedText(selected, locale, "summary", selected.summary)}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4">
+                <p className="text-sm leading-6 text-foreground">
+                  {localizedText(selected, locale, "detail", selected.detail)}
+                </p>
+                <section className="rounded-md border border-border bg-muted/20 p-3">
+                  <div className="mb-2 text-xs font-medium text-muted-foreground">
+                    {messages.duckPrompt}
+                  </div>
+                  <p className="whitespace-pre-wrap font-mono text-xs leading-5">
+                    {localizedText(
+                      selected,
+                      locale,
+                      "actionPrompt",
+                      selected.actionPrompt
+                    )}
+                  </p>
+                </section>
+              </div>
+              <DialogFooter>
+                <Button type="button" onClick={copyPrompt}>
+                  <Copy className="size-4" />
+                  {copied ? messages.duckCopied : messages.duckCopyPrompt}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function DuckBadge({ count }: { count: number }) {
+  return (
+    <span
+      data-testid="duck-unread-badge"
+      className="absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full bg-risk-high text-[11px] font-bold text-white shadow-md"
+      aria-hidden="true"
+    >
+      {count > 9 ? "!" : "!"}
+    </span>
+  );
+}
+
+function DuckImage({ className }: { className: string }) {
+  return (
+    <picture>
+      <source
+        srcSet="/rubber-duck/rubber-duck-2d5.webp?v=alpha1"
+        type="image/webp"
+      />
+      <img
+        src="/rubber-duck/rubber-duck-2d5.png?v=alpha1"
+        alt=""
+        className={className}
+      />
+    </picture>
   );
 }
 

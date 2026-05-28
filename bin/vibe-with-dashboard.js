@@ -68,7 +68,15 @@ const PROVIDER_PATHS = {
   replit: [".replit"],
 };
 
-const COMMANDS = new Set(["install", "ensure", "activity", "plan", "archive", "list"]);
+const COMMANDS = new Set([
+  "install",
+  "ensure",
+  "activity",
+  "plan",
+  "suggest",
+  "archive",
+  "list",
+]);
 
 function packageRoot() {
   return path.resolve(__dirname, "..");
@@ -99,7 +107,12 @@ function parseArgs(argv) {
     const next = argv[index + 1];
     const value = !next || next.startsWith("--") ? true : next;
     if (value !== true) index += 1;
-    if (key === "only" || key === "card" || key === "card-json") {
+    if (
+      key === "only" ||
+      key === "card" ||
+      key === "card-json" ||
+      key === "suggestion-json"
+    ) {
       args[key] = [...(args[key] || []), value];
     } else {
       args[key] = value;
@@ -235,6 +248,7 @@ function installProjectRules(projectRoot, dryRun) {
     "Before work, run `node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js ensure`.",
     "Record plan, implement, verify, result, and fail updates with the project-local Vibe with Dashboard CLI.",
     "Include `translations` for Plan/Kanban titles and summaries when the user's locale is known.",
+    "Use `suggest --suggestion-json` for Rubber Duck suggestions when project advice should be visible.",
     "Keep dashboard entries concise and never store secrets, credentials, private reasoning, or long terminal logs.",
   ].join("\n");
   writeMarkerFile(path.join(projectRoot, "AGENTS.md"), body, dryRun);
@@ -424,6 +438,18 @@ async function main(argv = process.argv.slice(2)) {
       ],
     });
     log(`plan: ${task}`);
+    return;
+  }
+
+  if (command === "suggest") {
+    const suggestions = flags.clear
+      ? []
+      : flags["suggestion-json"]?.map((value) => JSON.parse(String(value))) || [];
+    await postJson(`${baseUrl}/api/agent/suggestions`, {
+      source: flags.source || "agent",
+      suggestions,
+    });
+    log(flags.clear ? "suggestions cleared" : `suggestions: ${suggestions.length}`);
     return;
   }
 

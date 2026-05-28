@@ -1,5 +1,6 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 
@@ -11,6 +12,8 @@ import {
   archiveActiveBoard,
   getDashboardSnapshot,
   getSetting,
+  markDuckSuggestionRead,
+  replaceDuckSuggestions,
   updateCard,
   updateGoal,
   updateMilestone,
@@ -131,6 +134,72 @@ describe("vibe dashboard state", () => {
     expect(milestone?.status).toBe("complete");
   });
 
+  it("replaces, localizes, reads, clears, and archives duck suggestions", async () => {
+    upsertPlan({ task: "Duck advice" });
+    replaceDuckSuggestions({
+      source: "test-agent",
+      suggestions: [
+        {
+          keyword: "Tests",
+          title: "Add coverage",
+          summary: "Cover the new path.",
+          detail: "A focused test protects the dashboard contract.",
+          actionPrompt: "Add tests for this path.",
+          priority: "high",
+          translations: {
+            ko: {
+              keyword: "테스트",
+              title: "커버리지 추가",
+              summary: "새 경로를 검증한다.",
+              detail: "집중 테스트로 대시보드 계약을 보호한다.",
+              actionPrompt: "이 경로의 테스트를 추가해줘.",
+            },
+          },
+        },
+      ],
+    });
+
+    let snapshot = await getDashboardSnapshot();
+    expect(snapshot.duckSuggestions).toHaveLength(1);
+    expect(snapshot.duckSuggestions[0].readAt).toBeNull();
+    expect(snapshot.duckSuggestions[0].translations.ko?.keyword).toBe("테스트");
+
+    markDuckSuggestionRead(snapshot.duckSuggestions[0].id);
+    snapshot = await getDashboardSnapshot();
+    expect(snapshot.duckSuggestions[0].readAt).toBeTruthy();
+
+    replaceDuckSuggestions({ suggestions: [] });
+    snapshot = await getDashboardSnapshot();
+    expect(snapshot.duckSuggestions).toHaveLength(0);
+
+    replaceDuckSuggestions({
+      suggestions: [
+        {
+          keyword: "Archive",
+          title: "Preserve advice",
+          priority: "medium",
+        },
+      ],
+    });
+    const planned = await getDashboardSnapshot();
+    for (const card of planned.cards) {
+      updateCard(card.id, { status: "done" });
+    }
+    addActivity({
+      phase: "result",
+      title: "Done",
+      message: "Duck suggestions archived",
+      task: "duck",
+    });
+
+    const result = archiveActiveBoard();
+    expect(result.archived).toBe(true);
+
+    snapshot = await getDashboardSnapshot();
+    expect(snapshot.duckSuggestions).toHaveLength(0);
+    expect(snapshot.archives[0].snapshot.duckSuggestions).toHaveLength(1);
+  });
+
   it("archives complete boards and clears the active board", async () => {
     upsertPlan({ task: "Archive this board" });
     const planned = await getDashboardSnapshot();
@@ -190,5 +259,80 @@ describe("installer CLI", () => {
     expect(result.stdout).toContain("dry run complete");
     expect(result.stdout).toContain("npx -y skills add EmeraldTablet42/vibe-with-dashboard");
     expect(fs.existsSync(path.join(tempRoot, ".agents"))).toBe(false);
+  });
+
+  it("posts suggestion payloads through the CLI", async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibe-dashboard-cli-"));
+    let payload = "";
+    const server = http.createServer((request, response) => {
+      request.on("data", (chunk) => {
+        payload += chunk;
+      });
+      request.on("end", () => {
+        response.writeHead(201, { "content-type": "application/json" });
+        response.end(JSON.stringify({ ok: true }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("failed to start test server");
+    }
+
+    const result = await new Promise<{ status: number | null; stderr: string }>(
+      (resolve) => {
+        const child = spawn(
+          process.execPath,
+          [
+            "bin/vibe-with-dashboard.js",
+            "suggest",
+            "--project",
+            tempRoot,
+            "--suggestion-json",
+            JSON.stringify({
+              keyword: "Tests",
+              title: "Add tests",
+              actionPrompt: "Write tests.",
+            }),
+          ],
+          {
+            cwd: process.cwd(),
+            windowsHide: true,
+            env: {
+              ...process.env,
+              DASHBOARD_URL: `http://127.0.0.1:${address.port}`,
+            },
+          }
+        );
+        let stderr = "";
+        const timeout = setTimeout(() => {
+          child.kill();
+        }, 10_000);
+        child.stderr.on("data", (chunk) => {
+          stderr += String(chunk);
+        });
+        child.stdout.on("data", () => {
+          // drain output
+        });
+        child.on("close", (status) => {
+          clearTimeout(timeout);
+          resolve({ status, stderr });
+        });
+      }
+    );
+
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(payload)).toMatchObject({
+      suggestions: [
+        {
+          keyword: "Tests",
+          title: "Add tests",
+          actionPrompt: "Write tests.",
+        },
+      ],
+    });
+    fs.rmSync(tempRoot, { recursive: true, force: true });
   });
 });

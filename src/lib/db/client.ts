@@ -7,7 +7,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import * as schema from "@/lib/db/schema";
 import { getProjectRoot } from "@/lib/project-root";
 
-const SCHEMA_VERSION = "vibe-dashboard-v2";
+const SCHEMA_VERSION = "vibe-dashboard-v3";
 
 type SqliteDatabase = Database.Database;
 type DrizzleDatabase = ReturnType<typeof drizzle<typeof schema>>;
@@ -67,7 +67,13 @@ function getExistingSchemaVersion() {
 
 function resetLegacySchemaIfNeeded() {
   const version = getExistingSchemaVersion();
-  if (version === SCHEMA_VERSION || version === "vibe-dashboard-v1") return;
+  if (
+    version === SCHEMA_VERSION ||
+    version === "vibe-dashboard-v2" ||
+    version === "vibe-dashboard-v1"
+  ) {
+    return;
+  }
 
   const tableRows = getSqlite()
     .prepare(
@@ -179,6 +185,22 @@ export function initializeDatabase() {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS duck_suggestions (
+      id TEXT PRIMARY KEY,
+      board_id TEXT NOT NULL REFERENCES boards(id),
+      keyword TEXT NOT NULL,
+      title TEXT NOT NULL,
+      summary TEXT NOT NULL DEFAULT '',
+      detail TEXT NOT NULL DEFAULT '',
+      action_prompt TEXT NOT NULL DEFAULT '',
+      priority TEXT NOT NULL DEFAULT 'medium',
+      source TEXT NOT NULL DEFAULT 'agent',
+      translations_json TEXT NOT NULL DEFAULT '{}',
+      read_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS agent_checkpoints (
       id TEXT PRIMARY KEY,
       board_id TEXT NOT NULL REFERENCES boards(id),
@@ -242,6 +264,9 @@ export function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS activity_board_idx ON activity_entries(board_id);
     CREATE INDEX IF NOT EXISTS activity_created_idx ON activity_entries(created_at);
     CREATE INDEX IF NOT EXISTS activity_phase_idx ON activity_entries(phase);
+    CREATE INDEX IF NOT EXISTS duck_suggestions_board_idx ON duck_suggestions(board_id);
+    CREATE INDEX IF NOT EXISTS duck_suggestions_read_idx ON duck_suggestions(read_at);
+    CREATE INDEX IF NOT EXISTS duck_suggestions_priority_idx ON duck_suggestions(priority);
     CREATE INDEX IF NOT EXISTS checkpoints_board_idx ON agent_checkpoints(board_id);
     CREATE INDEX IF NOT EXISTS checkpoints_agent_idx ON agent_checkpoints(agent);
     CREATE INDEX IF NOT EXISTS checkpoints_created_idx ON agent_checkpoints(created_at);

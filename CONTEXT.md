@@ -19,3 +19,7 @@ A folded project snapshot panel for repo, GitHub, design token, harness, skill, 
 ## Locale
 
 The browser-preferred UI language. The shell supports English and Korean, falls back to English text for unsupported languages, and can display agent-supplied translations for Plan and Kanban items.
+
+## Rubber Duck
+
+A floating dashboard companion that displays agent-written project suggestions for the Active Board. It does not generate advice inside the web app.

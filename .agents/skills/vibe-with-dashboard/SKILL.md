@@ -20,7 +20,9 @@ Use this skill before doing the user's requested project work when monitoring is
    `node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js plan --task "<user task summary>"`
    When the user's locale is known, include agent-generated translations for Plan/Kanban item text:
    `node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js plan --task "Implement onboarding" --translations "{\"ko\":{\"title\":\"온보딩 구현\",\"task\":\"온보딩 구현\"}}" --card-json "{\"title\":\"Create screen\",\"translations\":{\"ko\":{\"title\":\"화면 만들기\"}}}"`
-6. Record start:
+6. Add 3-5 Rubber Duck suggestions when useful:
+   `node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js suggest --suggestion-json "{\"keyword\":\"Tests\",\"title\":\"Add coverage\",\"actionPrompt\":\"Add tests for the current change.\"}"`
+7. Record start:
    `node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js activity --phase start --title "Work started" --message "<user task summary>" --task "<short-task-id>"`
 
 `ensure` owns dependency check, port selection, server start/reuse, state writing, and default browser opening. Do not ask the user to start the server manually.
@@ -42,6 +44,7 @@ Use concise dashboard messages. Do not store private reasoning, long terminal du
 - The dashboard is monitoring-only: no prompt input or agent command queue.
 - Keep Plan and Kanban focused on the active task.
 - The UI shell detects browser locale. Translate Plan/Kanban titles and summaries yourself when a non-English locale is expected; the dashboard only selects stored translations.
+- Rubber Duck suggestions are also agent-written. Translate their keyword, title, summary, detail, and action prompt when a non-English locale is expected.
 - When all cards are done and result activity is recorded, run `vibe-with-dashboard archive` to store the completed board and clear the active board.
 
 ## Primary Commands
@@ -49,8 +52,15 @@ Use concise dashboard messages. Do not store private reasoning, long terminal du
 ```bash
 vibe-with-dashboard ensure
 vibe-with-dashboard plan --task "Implement auth flow"
+vibe-with-dashboard suggest --suggestion-json '{"keyword":"Tests","title":"Add coverage","actionPrompt":"Add tests for this change."}'
 vibe-with-dashboard activity --phase implement --title "Implementation" --message "Core files updated"
 vibe-with-dashboard archive
+```
+
+Rubber Duck suggestion-json example:
+
+```bash
+vibe-with-dashboard suggest --suggestion-json '{"keyword":"Docs","title":"Tighten setup docs","summary":"Clarify the install path.","detail":"The README should show the shortest project-local install and verify flow.","actionPrompt":"Review README.md and INSTALL.md for any unclear setup steps.","priority":"medium"}'
 ```
 
 Project-local fallback:

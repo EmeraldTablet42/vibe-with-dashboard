@@ -8,6 +8,7 @@ import {
   boards,
   cards,
   designTokens,
+  duckSuggestions,
   goals,
   harnessProfiles,
   milestones,
@@ -167,6 +168,7 @@ export function resetSeedDataForTests() {
   for (const table of [
     activityEntries,
     agentCheckpoints,
+    duckSuggestions,
     cards,
     milestones,
     goals,

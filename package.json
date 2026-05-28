@@ -20,6 +20,7 @@
     "dashboard:ensure": "node bin/vibe-with-dashboard.js ensure",
     "dashboard:activity": "node bin/vibe-with-dashboard.js activity",
     "dashboard:plan": "node bin/vibe-with-dashboard.js plan",
+    "dashboard:suggest": "node bin/vibe-with-dashboard.js suggest",
     "dashboard:archive": "node bin/vibe-with-dashboard.js archive",
     "dashboard": "tsx scripts/launcher.ts",
     "dev": "next dev --turbopack --hostname 127.0.0.1 --port 3000",
