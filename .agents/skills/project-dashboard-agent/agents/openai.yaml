@@ -1,0 +1,4 @@
+interface:
+  display_name: "Project Dashboard Agent"
+  short_description: "Operate the local dashboard MCP run loop."
+  default_prompt: "Use this skill to connect to the local project dashboard MCP, poll Runs, report progress, request decisions, and stop gracefully when shutdown is requested."
