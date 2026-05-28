@@ -192,6 +192,13 @@ function copyApp(projectRoot, dryRun) {
   for (const entry of fs.readdirSync(sourceRoot)) {
     copyRecursive(path.join(sourceRoot, entry), path.join(targetRoot, entry), dryRun);
   }
+  const appPackage = path.join(sourceRoot, "templates", "app-package.json");
+  if (exists(appPackage)) {
+    log(`${dryRun ? "would write" : "write"} dashboard app package.json`);
+    if (!dryRun) {
+      fs.copyFileSync(appPackage, path.join(targetRoot, "package.json"));
+    }
+  }
 }
 
 function copySkill(sourceRoot, targetRoot, dryRun) {
