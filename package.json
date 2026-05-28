@@ -54,6 +54,7 @@
     "vitest.config.ts",
     "README.md",
     "INSTALL.md",
+    "CONTEXT.md",
     "AGENTS.md",
     "CLAUDE.md",
     "GEMINI.md",

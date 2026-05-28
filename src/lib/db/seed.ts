@@ -93,7 +93,7 @@ export function ensureSeedData() {
         id: "harness-vibe-monitoring",
         name: "Vibe with Dashboard",
         description:
-          "Project-local monitoring for LLM agent work. No prompt queue, heartbeat, or MCP sidecar.",
+          "Project-local monitoring for LLM agent work without an in-app command queue.",
         skillsJson: JSON.stringify(["vibe-with-dashboard"]),
         mcpJson: JSON.stringify({}),
         instructions:

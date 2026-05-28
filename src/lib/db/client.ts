@@ -7,7 +7,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import * as schema from "@/lib/db/schema";
 import { getProjectRoot } from "@/lib/project-root";
 
-const SCHEMA_VERSION = "vibe-dashboard-v1";
+const SCHEMA_VERSION = "vibe-dashboard-v2";
 
 type SqliteDatabase = Database.Database;
 type DrizzleDatabase = ReturnType<typeof drizzle<typeof schema>>;
@@ -67,27 +67,28 @@ function getExistingSchemaVersion() {
 
 function resetLegacySchemaIfNeeded() {
   const version = getExistingSchemaVersion();
-  if (version === SCHEMA_VERSION) return;
+  if (version === SCHEMA_VERSION || version === "vibe-dashboard-v1") return;
 
-  getSqlite().exec(`
-    PRAGMA foreign_keys = OFF;
-    DROP TABLE IF EXISTS decisions;
-    DROP TABLE IF EXISTS codex_sessions;
-    DROP TABLE IF EXISTS events;
-    DROP TABLE IF EXISTS runs;
-    DROP TABLE IF EXISTS activity_entries;
-    DROP TABLE IF EXISTS agent_checkpoints;
-    DROP TABLE IF EXISTS cards;
-    DROP TABLE IF EXISTS milestones;
-    DROP TABLE IF EXISTS goals;
-    DROP TABLE IF EXISTS board_archives;
-    DROP TABLE IF EXISTS boards;
-    DROP TABLE IF EXISTS design_tokens;
-    DROP TABLE IF EXISTS harness_profiles;
-    DROP TABLE IF EXISTS subagents;
-    DROP TABLE IF EXISTS settings;
-    PRAGMA foreign_keys = ON;
-  `);
+  const tableRows = getSqlite()
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+    )
+    .all() as Array<{ name: string }>;
+
+  getSqlite().exec("PRAGMA foreign_keys = OFF;");
+  for (const row of tableRows) {
+    if (!/^[A-Za-z0-9_]+$/.test(row.name)) continue;
+    getSqlite().exec(`DROP TABLE IF EXISTS "${row.name}";`);
+  }
+  getSqlite().exec("PRAGMA foreign_keys = ON;");
+}
+
+function ensureColumn(table: string, column: string, definition: string) {
+  const rows = getSqlite().prepare(`PRAGMA table_info(${table})`).all() as Array<{
+    name: string;
+  }>;
+  if (rows.some((row) => row.name === column)) return;
+  getSqlite().exec(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
 }
 
 export function initializeDatabase() {
@@ -100,6 +101,7 @@ export function initializeDatabase() {
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
       task TEXT NOT NULL DEFAULT '',
+      translations_json TEXT NOT NULL DEFAULT '{}',
       status TEXT NOT NULL DEFAULT 'active',
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -120,6 +122,7 @@ export function initializeDatabase() {
       board_id TEXT NOT NULL REFERENCES boards(id),
       title TEXT NOT NULL,
       summary TEXT NOT NULL,
+      translations_json TEXT NOT NULL DEFAULT '{}',
       status TEXT NOT NULL DEFAULT 'active',
       priority TEXT NOT NULL DEFAULT 'medium',
       position INTEGER NOT NULL DEFAULT 0,
@@ -133,6 +136,7 @@ export function initializeDatabase() {
       goal_id TEXT NOT NULL REFERENCES goals(id),
       title TEXT NOT NULL,
       summary TEXT NOT NULL,
+      translations_json TEXT NOT NULL DEFAULT '{}',
       status TEXT NOT NULL DEFAULT 'planned',
       priority TEXT NOT NULL DEFAULT 'medium',
       due_date TEXT,
@@ -147,6 +151,7 @@ export function initializeDatabase() {
       milestone_id TEXT NOT NULL REFERENCES milestones(id),
       title TEXT NOT NULL,
       summary TEXT NOT NULL,
+      translations_json TEXT NOT NULL DEFAULT '{}',
       status TEXT NOT NULL DEFAULT 'backlog',
       priority TEXT NOT NULL DEFAULT 'medium',
       owner TEXT NOT NULL DEFAULT 'agent',
@@ -169,6 +174,7 @@ export function initializeDatabase() {
       task TEXT NOT NULL DEFAULT '',
       title TEXT NOT NULL,
       message TEXT NOT NULL,
+      translations_json TEXT NOT NULL DEFAULT '{}',
       metadata_json TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -240,6 +246,20 @@ export function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS checkpoints_agent_idx ON agent_checkpoints(agent);
     CREATE INDEX IF NOT EXISTS checkpoints_created_idx ON agent_checkpoints(created_at);
   `);
+
+  ensureColumn("boards", "translations_json", "translations_json TEXT NOT NULL DEFAULT '{}'");
+  ensureColumn("goals", "translations_json", "translations_json TEXT NOT NULL DEFAULT '{}'");
+  ensureColumn(
+    "milestones",
+    "translations_json",
+    "translations_json TEXT NOT NULL DEFAULT '{}'"
+  );
+  ensureColumn("cards", "translations_json", "translations_json TEXT NOT NULL DEFAULT '{}'");
+  ensureColumn(
+    "activity_entries",
+    "translations_json",
+    "translations_json TEXT NOT NULL DEFAULT '{}'"
+  );
 
   getSqlite()
     .prepare(

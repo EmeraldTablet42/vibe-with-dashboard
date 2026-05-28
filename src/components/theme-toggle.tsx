@@ -10,7 +10,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-export function ThemeToggle() {
+export function ThemeToggle({ label = "Toggle theme" }: { label?: string }) {
   const { theme, setTheme } = useTheme();
   const nextTheme = theme === "dark" ? "light" : "dark";
 
@@ -22,7 +22,7 @@ export function ThemeToggle() {
             type="button"
             variant="outline"
             size="icon"
-            aria-label="테마 전환"
+            aria-label={label}
             onClick={() => setTheme(nextTheme)}
           >
             <Sun className="size-4 dark:hidden" />
@@ -30,7 +30,7 @@ export function ThemeToggle() {
           </Button>
         }
       />
-      <TooltipContent>테마 전환</TooltipContent>
+      <TooltipContent>{label}</TooltipContent>
     </Tooltip>
   );
 }

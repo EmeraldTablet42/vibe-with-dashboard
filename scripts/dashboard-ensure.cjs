@@ -140,6 +140,15 @@ function isSameDashboard(health) {
   );
 }
 
+function wantsDevMode() {
+  return process.env.VIBE_DASHBOARD_DEV === "1";
+}
+
+function isReusableDashboard(health) {
+  if (!isSameDashboard(health)) return false;
+  return wantsDevMode() || health.json?.mode !== "development";
+}
+
 function runPowerShell(script) {
   const result = spawnSync(
     "powershell.exe",
@@ -269,14 +278,14 @@ async function findExistingDashboard() {
   const state = readState();
   if (state?.port) {
     const health = await getHealth(Number(state.port));
-    if (isSameDashboard(health)) {
+    if (isReusableDashboard(health)) {
       return writeState(Number(state.port), state.pid ?? null, true);
     }
   }
 
   for (let port = startPort; port <= maxPort; port += 1) {
     const health = await getHealth(port);
-    if (isSameDashboard(health)) {
+    if (isReusableDashboard(health)) {
       return writeState(port, null, true);
     }
   }
@@ -307,7 +316,7 @@ async function chooseDashboard() {
     }
 
     const pid = startLauncher(port);
-    const ready = await waitForSameDashboard(port, 60_000);
+    const ready = await waitForSameDashboard(port, 180_000);
     if (!ready) {
       stopProcessTree(pid);
       throw new Error(`dashboard started on ${port} but did not become healthy`);

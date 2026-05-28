@@ -7,6 +7,7 @@ export const boards = sqliteTable(
     id: text("id").primaryKey(),
     title: text("title").notNull(),
     task: text("task").notNull().default(""),
+    translationsJson: text("translations_json").notNull().default("{}"),
     status: text("status").notNull().default("active"),
     createdAt: text("created_at")
       .notNull()
@@ -43,6 +44,7 @@ export const goals = sqliteTable(
       .references(() => boards.id),
     title: text("title").notNull(),
     summary: text("summary").notNull(),
+    translationsJson: text("translations_json").notNull().default("{}"),
     status: text("status").notNull().default("active"),
     priority: text("priority").notNull().default("medium"),
     position: integer("position").notNull().default(0),
@@ -68,6 +70,7 @@ export const milestones = sqliteTable(
       .references(() => goals.id),
     title: text("title").notNull(),
     summary: text("summary").notNull(),
+    translationsJson: text("translations_json").notNull().default("{}"),
     status: text("status").notNull().default("planned"),
     priority: text("priority").notNull().default("medium"),
     dueDate: text("due_date"),
@@ -97,6 +100,7 @@ export const cards = sqliteTable(
       .references(() => milestones.id),
     title: text("title").notNull(),
     summary: text("summary").notNull(),
+    translationsJson: text("translations_json").notNull().default("{}"),
     status: text("status").notNull().default("backlog"),
     priority: text("priority").notNull().default("medium"),
     owner: text("owner").notNull().default("agent"),
@@ -134,6 +138,7 @@ export const activityEntries = sqliteTable(
     task: text("task").notNull().default(""),
     title: text("title").notNull(),
     message: text("message").notNull(),
+    translationsJson: text("translations_json").notNull().default("{}"),
     metadataJson: text("metadata_json").notNull().default("{}"),
     createdAt: text("created_at")
       .notNull()

@@ -26,6 +26,7 @@ import type {
   CardPriority,
   CardStatus,
   GoalStatus,
+  LocaleTranslations,
   MilestoneStatus,
 } from "@/lib/types";
 
@@ -37,6 +38,10 @@ function parseJson<T>(value: string, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+function stringifyTranslations(translations?: LocaleTranslations) {
+  return JSON.stringify(translations ?? {});
 }
 
 function compactPatch<T extends Record<string, unknown>>(input: T) {
@@ -135,6 +140,7 @@ function getBoardRows(boardId: string) {
   const cardsWithDependencies = cardRows.map((card) => ({
     ...card,
     dependsOn: parseJson<string[]>(card.dependsOnJson, []),
+    translations: parseJson<LocaleTranslations>(card.translationsJson, {}),
   }));
 
   return {
@@ -201,6 +207,10 @@ export async function getDashboardSnapshot() {
     appId: "vibe-with-dashboard",
     board: {
       ...activeBoard,
+      translations: parseJson<LocaleTranslations>(
+        activeBoard.translationsJson,
+        {}
+      ),
       isEmpty: goalRows.length === 0 && cardsWithDependencies.length === 0,
       archiveReady,
     },
@@ -210,10 +220,15 @@ export async function getDashboardSnapshot() {
     })),
     goals: goalRows.map((goal) => ({
       ...goal,
+      translations: parseJson<LocaleTranslations>(goal.translationsJson, {}),
       milestones: milestoneRows
         .filter((milestone) => milestone.goalId === goal.id)
         .map((milestone) => ({
           ...milestone,
+          translations: parseJson<LocaleTranslations>(
+            milestone.translationsJson,
+            {}
+          ),
           cards: cardsWithDependencies.filter(
             (card) => card.milestoneId === milestone.id
           ),
@@ -223,6 +238,10 @@ export async function getDashboardSnapshot() {
     activityEntries: activityRows.map((activity) => ({
       ...activity,
       metadata: parseJson<Record<string, unknown>>(activity.metadataJson, {}),
+      translations: parseJson<LocaleTranslations>(
+        activity.translationsJson,
+        {}
+      ),
     })),
     agentCheckpoints: checkpointRows.map((checkpoint) => ({
       ...checkpoint,
@@ -255,9 +274,16 @@ export function upsertPlan(input: {
   title?: string;
   summary?: string;
   source?: string;
+  translations?: LocaleTranslations;
+  milestone?: {
+    title?: string;
+    summary?: string;
+    translations?: LocaleTranslations;
+  };
   cards?: Array<{
     title: string;
     summary?: string;
+    translations?: LocaleTranslations;
     priority?: CardPriority;
     status?: CardStatus;
     size?: string;
@@ -269,16 +295,19 @@ export function upsertPlan(input: {
   const title = input.title?.trim() || input.task.trim() || "Untitled task";
   const summary =
     input.summary?.trim() ||
-    "Agent 작업 계획이 생성되면 Plan과 Kanban에서 진행 상태를 관측한다.";
+    "The active board tracks LLM agent progress across Plan and Kanban.";
   const db = getDb();
 
   db.update(boards)
-    .set({
+    .set(compactPatch({
       title,
       task: input.task,
+      translationsJson: input.translations
+        ? stringifyTranslations(input.translations)
+        : undefined,
       status: "active",
       updatedAt: now(),
-    })
+    }))
     .where(eq(boards.id, board.id))
     .run();
 
@@ -297,6 +326,7 @@ export function upsertPlan(input: {
         boardId: board.id,
         title,
         summary,
+        translationsJson: stringifyTranslations(input.translations),
         status: "active",
         priority: "high",
         position: 1,
@@ -307,7 +337,17 @@ export function upsertPlan(input: {
     goal = db.select().from(goals).where(eq(goals.id, goalId)).get();
   } else {
     db.update(goals)
-      .set({ title, summary, status: "active", updatedAt: now() })
+      .set(
+        compactPatch({
+          title,
+          summary,
+          translationsJson: input.translations
+            ? stringifyTranslations(input.translations)
+            : undefined,
+          status: "active",
+          updatedAt: now(),
+        })
+      )
       .where(eq(goals.id, goal.id))
       .run();
   }
@@ -323,13 +363,16 @@ export function upsertPlan(input: {
 
   if (!milestone) {
     const milestoneId = randomUUID();
+    const milestoneTitle = input.milestone?.title?.trim() || "Current work";
+    const milestoneSummary = input.milestone?.summary?.trim() || summary;
     db.insert(milestones)
       .values({
         id: milestoneId,
         boardId: board.id,
         goalId: goal.id,
-        title: "Current work",
-        summary,
+        title: milestoneTitle,
+        summary: milestoneSummary,
+        translationsJson: stringifyTranslations(input.milestone?.translations),
         status: "active",
         priority: "high",
         position: 1,
@@ -338,6 +381,20 @@ export function upsertPlan(input: {
       })
       .run();
     milestone = db.select().from(milestones).where(eq(milestones.id, milestoneId)).get();
+  } else if (input.milestone) {
+    db.update(milestones)
+      .set(
+        compactPatch({
+          title: input.milestone.title?.trim(),
+          summary: input.milestone.summary?.trim(),
+          translationsJson: input.milestone.translations
+            ? stringifyTranslations(input.milestone.translations)
+            : undefined,
+          updatedAt: now(),
+        })
+      )
+      .where(eq(milestones.id, milestone.id))
+      .run();
   }
 
   if (!milestone) throw new Error("failed to create milestone");
@@ -370,6 +427,7 @@ export function upsertPlan(input: {
         milestoneId: milestone.id,
         title: card.title,
         summary: card.summary || summary,
+        translationsJson: stringifyTranslations(card.translations),
         status: card.status ?? "ready",
         priority: card.priority ?? "medium",
         size: card.size ?? "M",
@@ -391,6 +449,7 @@ export function upsertPlan(input: {
     title: "Plan updated",
     message: title,
     metadata: { cards: requestedCards.length },
+    translations: input.translations,
   });
 
   publishDashboardEvent({ kind: "snapshot", id: board.id, message: "plan" });
@@ -423,6 +482,30 @@ export function archiveActiveBoard() {
 
   const archiveId = randomUUID();
   const archivedAt = now();
+  const archivedCards = cardsWithDependencies;
+  const archivedGoals = goalRows.map((goal) => ({
+    ...goal,
+    translations: parseJson<LocaleTranslations>(goal.translationsJson, {}),
+    milestones: milestoneRows
+      .filter((milestone) => milestone.goalId === goal.id)
+      .map((milestone) => ({
+        ...milestone,
+        translations: parseJson<LocaleTranslations>(
+          milestone.translationsJson,
+          {}
+        ),
+        cards: archivedCards.filter((card) => card.milestoneId === milestone.id),
+      })),
+  }));
+  const archivedActivities = activityRows.map((activity) => ({
+    ...activity,
+    metadata: parseJson<Record<string, unknown>>(activity.metadataJson, {}),
+    translations: parseJson<LocaleTranslations>(
+      activity.translationsJson,
+      {}
+    ),
+  }));
+
   getDb()
     .insert(boardArchives)
     .values({
@@ -431,11 +514,14 @@ export function archiveActiveBoard() {
       title: board.title,
       task: board.task,
       snapshotJson: JSON.stringify({
-        board,
-        goals: goalRows,
+        board: {
+          ...board,
+          translations: parseJson<LocaleTranslations>(board.translationsJson, {}),
+        },
+        goals: archivedGoals,
         milestones: milestoneRows,
-        cards: cardsWithDependencies,
-        activityEntries: activityRows,
+        cards: archivedCards,
+        activityEntries: archivedActivities,
         agentCheckpoints: checkpointRows,
         archivedAt,
       }),
@@ -474,6 +560,7 @@ export function addActivity(input: {
   task?: string;
   title: string;
   message: string;
+  translations?: LocaleTranslations;
   metadata?: unknown;
 }) {
   const board = getActiveBoardRow();
@@ -489,6 +576,7 @@ export function addActivity(input: {
       task: input.task ?? "",
       title: input.title,
       message: input.message,
+      translationsJson: stringifyTranslations(input.translations),
       metadataJson: JSON.stringify(input.metadata ?? {}),
       createdAt: now(),
     })
@@ -510,6 +598,7 @@ export function getActivityById(id: string) {
   return {
     ...row,
     metadata: parseJson<Record<string, unknown>>(row.metadataJson, {}),
+    translations: parseJson<LocaleTranslations>(row.translationsJson, {}),
   };
 }
 
@@ -545,6 +634,7 @@ export function updateCard(
   input: {
     title?: string;
     summary?: string;
+    translations?: LocaleTranslations;
     status?: CardStatus;
     priority?: CardPriority;
     position?: number;
@@ -552,7 +642,12 @@ export function updateCard(
 ) {
   ensureSeedData();
   const card = getDb().select().from(cards).where(eq(cards.id, cardId)).get();
-  const patch = compactPatch({ ...input, updatedAt: now() });
+  const { translations, ...fields } = input;
+  const patch = compactPatch({
+    ...fields,
+    translationsJson: translations ? stringifyTranslations(translations) : undefined,
+    updatedAt: now(),
+  });
   getDb().update(cards).set(patch).where(eq(cards.id, cardId)).run();
 
   if (card) {
@@ -562,7 +657,7 @@ export function updateCard(
       status: "done",
       task: cardId,
       title: "Card updated",
-      message: `${card.title} 상태가 갱신되었다.`,
+      message: `${card.title} status changed.`,
       metadata: input,
     });
   }
@@ -574,13 +669,19 @@ export function updateGoal(
   input: {
     title?: string;
     summary?: string;
+    translations?: LocaleTranslations;
     status?: GoalStatus;
     priority?: CardPriority;
     position?: number;
   }
 ) {
   ensureSeedData();
-  const patch = compactPatch({ ...input, updatedAt: now() });
+  const { translations, ...fields } = input;
+  const patch = compactPatch({
+    ...fields,
+    translationsJson: translations ? stringifyTranslations(translations) : undefined,
+    updatedAt: now(),
+  });
   getDb().update(goals).set(patch).where(eq(goals.id, goalId)).run();
   publishDashboardEvent({ kind: "goal", id: goalId, message: "updated" });
 }
@@ -590,13 +691,19 @@ export function updateMilestone(
   input: {
     title?: string;
     summary?: string;
+    translations?: LocaleTranslations;
     status?: MilestoneStatus;
     priority?: CardPriority;
     position?: number;
   }
 ) {
   ensureSeedData();
-  const patch = compactPatch({ ...input, updatedAt: now() });
+  const { translations, ...fields } = input;
+  const patch = compactPatch({
+    ...fields,
+    translationsJson: translations ? stringifyTranslations(translations) : undefined,
+    updatedAt: now(),
+  });
   getDb()
     .update(milestones)
     .set(patch)

@@ -18,6 +18,8 @@ Use this skill before doing the user's requested project work when monitoring is
 4. Tell the user the dashboard URL in one short sentence.
 5. Create or update the active board:
    `node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js plan --task "<user task summary>"`
+   When the user's locale is known, include agent-generated translations for Plan/Kanban item text:
+   `node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js plan --task "Implement onboarding" --translations "{\"ko\":{\"title\":\"온보딩 구현\",\"task\":\"온보딩 구현\"}}" --card-json "{\"title\":\"Create screen\",\"translations\":{\"ko\":{\"title\":\"화면 만들기\"}}}"`
 6. Record start:
    `node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js activity --phase start --title "Work started" --message "<user task summary>" --task "<short-task-id>"`
 
@@ -37,8 +39,9 @@ Use concise dashboard messages. Do not store private reasoning, long terminal du
 
 ## Board Lifecycle
 
-- The dashboard is monitoring-only: no prompt queue, Run queue, Decision queue, heartbeat loop, or MCP sidecar.
+- The dashboard is monitoring-only: no prompt input or agent command queue.
 - Keep Plan and Kanban focused on the active task.
+- The UI shell detects browser locale. Translate Plan/Kanban titles and summaries yourself when a non-English locale is expected; the dashboard only selects stored translations.
 - When all cards are done and result activity is recorded, run `vibe-with-dashboard archive` to store the completed board and clear the active board.
 
 ## Primary Commands

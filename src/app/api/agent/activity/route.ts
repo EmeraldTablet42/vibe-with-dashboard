@@ -13,6 +13,15 @@ const activitySchema = z.object({
   task: z.string().default(""),
   title: z.string().min(1),
   message: z.string().min(1),
+  translations: z
+    .record(
+      z.string(),
+      z.object({
+        title: z.string().optional(),
+        message: z.string().optional(),
+      })
+    )
+    .optional(),
   metadata: z.unknown().optional(),
   checkpoint: z
     .object({

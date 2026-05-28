@@ -31,6 +31,7 @@ What it does:
 - Adds a small marker block to `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md`.
 - Leaves global agent settings alone unless `--global`, `--all`, or `--only <agent>` is passed.
 - Skips unrelated services and never kills a process just because it owns port `3000`.
+- Runs the dashboard in production mode by default. Use `VIBE_DASHBOARD_DEV=1` only for dashboard development.
 
 Preview without writing:
 
@@ -99,6 +100,7 @@ After install:
 ```bash
 node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js ensure
 node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js plan --task "Verify dashboard install"
+node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js plan --task "Verify dashboard install" --translations '{"ko":{"title":"대시보드 설치 확인","task":"대시보드 설치 확인"}}'
 node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js activity --phase result --message "Install verified"
 ```
 
@@ -108,6 +110,7 @@ Expected:
 - `/api/health` returns `appId: "vibe-with-dashboard"`.
 - Plan sidebar shows the task.
 - Kanban shows at least one card.
+- If the browser locale is Korean and the agent supplied Korean translations, Plan/Kanban items use those translated titles and summaries.
 - Activity sheet shows the result entry.
 
 ## Uninstall

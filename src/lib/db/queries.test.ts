@@ -33,8 +33,27 @@ describe("vibe dashboard state", () => {
 
     upsertPlan({
       task: "Ship public installer",
+      translations: {
+        ko: {
+          title: "공개 설치 도구 배포",
+          summary: "한국어 계획 요약",
+          task: "공개 설치 도구 배포",
+        },
+      },
+      milestone: {
+        translations: {
+          ko: { title: "현재 작업", summary: "한국어 마일스톤 요약" },
+        },
+      },
       cards: [
-        { title: "Installer", summary: "GitHub URL install", priority: "high" },
+        {
+          title: "Installer",
+          summary: "GitHub URL install",
+          translations: {
+            ko: { title: "설치 도구", summary: "GitHub URL 설치" },
+          },
+          priority: "high",
+        },
         { title: "Archive flow", summary: "Clear finished board" },
       ],
     });
@@ -42,7 +61,13 @@ describe("vibe dashboard state", () => {
     snapshot = await getDashboardSnapshot();
     expect(snapshot.board.title).toBe("Ship public installer");
     expect(snapshot.goals).toHaveLength(1);
+    expect(snapshot.board.translations.ko?.title).toBe("공개 설치 도구 배포");
+    expect(snapshot.goals[0].translations.ko?.title).toBe("공개 설치 도구 배포");
+    expect(snapshot.goals[0].milestones[0].translations.ko?.title).toBe(
+      "현재 작업"
+    );
     expect(snapshot.cards.map((card) => card.title)).toContain("Installer");
+    expect(snapshot.cards[0].translations.ko?.title).toBe("설치 도구");
     expect(snapshot.activityEntries.some((entry) => entry.phase === "plan")).toBe(true);
   });
 
@@ -129,15 +154,14 @@ describe("vibe dashboard state", () => {
     expect(snapshot.archives).toHaveLength(1);
   });
 
-  it("exposes Vibe with Dashboard launch settings without Run or Decision state", async () => {
+  it("exposes Vibe with Dashboard launch settings without queue state", async () => {
     upsertSetting("dashboard_url", "http://127.0.0.1:3010");
     expect(getSetting("dashboard_url")).toBe("http://127.0.0.1:3010");
 
     const snapshot = await getDashboardSnapshot();
     expect(snapshot.launch.command).toBe("$vibe-with-dashboard <user task>");
     expect(snapshot.launch.dashboardUrl).toBe("http://127.0.0.1:3010");
-    expect("runs" in snapshot).toBe(false);
-    expect("decisions" in snapshot).toBe(false);
+    expect("queue" in snapshot).toBe(false);
   });
 });
 

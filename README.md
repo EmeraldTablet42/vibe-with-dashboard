@@ -4,7 +4,7 @@ Local monitoring dashboard for LLM agent work.
 
 Vibe with Dashboard keeps your project plan, Kanban board, current processing state, repo snapshot, skills, and agent activity visible while the actual work stays in your coding agent.
 
-No prompt box. No Run queue. No heartbeat loop. No MCP sidecar. Just a local display board for vibe coding.
+No prompt box. No agent command queue. Just a local display board for vibe coding.
 
 Install • Use • What You Get • Agent Support • [Full install guide](./INSTALL.md)
 
@@ -61,12 +61,14 @@ The skill tells the agent to:
 3. Open the dashboard in your default browser.
 4. Create/update the active plan board.
 5. Record `start`, `plan`, `implement`, `verify`, `result`, or `fail` activity.
+6. Provide Plan/Kanban item translations when the agent knows the user's target locale.
 
 Manual commands:
 
 ```bash
 vibe-with-dashboard ensure
 vibe-with-dashboard plan --task "Implement onboarding"
+vibe-with-dashboard plan --task "Implement onboarding" --translations '{"ko":{"title":"온보딩 구현","task":"온보딩 구현"}}'
 vibe-with-dashboard activity --phase implement --message "Core UI updated"
 vibe-with-dashboard archive
 ```
@@ -90,6 +92,7 @@ node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js archive
 | Activity sheet | Agent activity timeline, hidden until toggled. |
 | Inspector | Repo, GitHub, design tokens, harness files, skills, MCP, subagents. |
 | Archive | Finished boards are stored, then the active board clears. |
+| Locale | English by default, Korean supported, unsupported locales fall back to English. Agent-supplied Plan/Kanban translations are shown when available. |
 
 ## Agent Support
 
@@ -125,6 +128,8 @@ npm run verify
 npm run build
 npm run e2e
 ```
+
+The launcher runs production `next start` by default and builds when needed. Use `VIBE_DASHBOARD_DEV=1 npm run dashboard` or `npm run dev` only when developing the dashboard itself.
 
 The app binds to `127.0.0.1`, stores local state in `.dashboard/`, and keeps private reasoning, credentials, secrets, and long terminal dumps out of activity records.
 

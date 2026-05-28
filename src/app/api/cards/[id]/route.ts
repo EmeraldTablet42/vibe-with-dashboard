@@ -9,6 +9,16 @@ export const runtime = "nodejs";
 const cardPatchSchema = z.object({
   title: z.string().min(1).optional(),
   summary: z.string().min(1).optional(),
+  translations: z
+    .record(
+      z.string(),
+      z.object({
+        title: z.string().optional(),
+        summary: z.string().optional(),
+        acceptanceCriteria: z.string().optional(),
+      })
+    )
+    .optional(),
   status: z.enum(["backlog", "ready", "doing", "review", "done"]).optional(),
   priority: z.enum(["high", "medium", "low"]).optional(),
   position: z.number().int().nonnegative().optional(),

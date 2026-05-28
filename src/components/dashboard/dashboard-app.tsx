@@ -3,12 +3,12 @@
 import * as React from "react";
 import {
   Activity,
+  Archive,
   Bot,
   Boxes,
   CheckCircle2,
   CircleDot,
   Clock3,
-  Code2,
   GitBranch,
   GitPullRequest,
   GripVertical,
@@ -39,7 +39,6 @@ import { Separator } from "@/components/ui/separator";
 import {
   Sheet,
   SheetContent,
-  SheetDescription,
   SheetHeader,
   SheetTitle,
   SheetTrigger,
@@ -55,82 +54,105 @@ import type {
   DashboardCard,
   DashboardSnapshot,
 } from "@/lib/dashboard-types";
-import type { CardPriority, CardStatus } from "@/lib/types";
-
-const statusRows: Array<{
-  id: CardStatus;
-  label: string;
-  hint: string;
-  color: string;
-}> = [
-  {
-    id: "backlog",
-    label: "Backlog",
-    hint: "아직 실행하지 않음",
-    color: "bg-muted/20",
-  },
-  {
-    id: "ready",
-    label: "Ready",
-    hint: "바로 투입 가능",
-    color: "bg-status-ready/15",
-  },
-  {
-    id: "doing",
-    label: "Doing",
-    hint: "현재 처리 중",
-    color: "bg-status-running/15",
-  },
-  {
-    id: "review",
-    label: "Review",
-    hint: "검토와 확인 필요",
-    color: "bg-status-review/15",
-  },
-  {
-    id: "done",
-    label: "Done",
-    hint: "검증 후 완료",
-    color: "bg-status-done/15",
-  },
-];
-
-const priorityColumns: Array<{
-  id: CardPriority;
-  label: string;
-  hint: string;
-}> = [
-  { id: "high", label: "High", hint: "먼저 볼 것" },
-  { id: "medium", label: "Medium", hint: "일반 흐름" },
-  { id: "low", label: "Low", hint: "나중에" },
-];
-
-const phaseLabels: Record<string, string> = {
-  start: "Start",
-  plan: "Plan",
-  implement: "Implement",
-  verify: "Verify",
-  result: "Result",
-  fail: "Fail",
-};
+import {
+  dashboardMessages,
+  resolveLocale,
+  type DashboardMessages,
+  type SupportedLocale,
+} from "@/lib/i18n";
+import type { CardPriority, CardStatus, LocaleTranslations } from "@/lib/types";
 
 const DEFAULT_PLAN_WIDTH = 360;
 const MIN_PLAN_WIDTH = 280;
 const MAX_PLAN_WIDTH = 560;
 
-function formatKstTime(value: string) {
-  const date = new Date(value);
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Asia/Seoul",
+const statuses: CardStatus[] = ["backlog", "ready", "doing", "review", "done"];
+const priorities: CardPriority[] = ["high", "medium", "low"];
+const phases = ["start", "plan", "implement", "verify", "result"] as const;
+
+const statusTone: Record<CardStatus, string> = {
+  backlog: "bg-muted/20",
+  ready: "bg-status-ready/15",
+  doing: "bg-status-running/15",
+  review: "bg-status-review/15",
+  done: "bg-status-done/15",
+};
+
+type ArchiveRecord = DashboardSnapshot["archives"][number];
+type ArchiveGoal = Omit<DashboardSnapshot["goals"][number], "milestones"> & {
+  milestones?: DashboardSnapshot["goals"][number]["milestones"];
+};
+type ArchiveMilestone = Omit<
+  DashboardSnapshot["goals"][number]["milestones"][number],
+  "cards"
+> & {
+  cards?: DashboardCard[];
+};
+
+type ArchivedSnapshot = {
+  board?: DashboardSnapshot["board"];
+  goals?: ArchiveGoal[];
+  milestones?: ArchiveMilestone[];
+  cards?: DashboardCard[];
+  activityEntries?: DashboardActivity[];
+  archivedAt?: string;
+};
+
+function useLocale() {
+  const [locale] = React.useState<SupportedLocale>(() =>
+    typeof navigator === "undefined" ? "en" : resolveLocale(navigator.languages)
+  );
+
+  return {
+    locale,
+    messages: dashboardMessages[locale],
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  };
+}
+
+function formatTime(value: string, locale: SupportedLocale, timeZone: string) {
+  return new Intl.DateTimeFormat(locale, {
+    timeZone,
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
-    hour12: false,
-  }).formatToParts(date);
-  const get = (type: string) =>
-    parts.find((part) => part.type === type)?.value ?? "00";
+  }).format(new Date(value));
+}
 
-  return `${get("hour")}:${get("minute")}:${get("second")}`;
+function readArchiveSnapshot(archive?: ArchiveRecord): ArchivedSnapshot {
+  return (archive?.snapshot ?? {}) as ArchivedSnapshot;
+}
+
+function localizedText(
+  entity: {
+    translations?: LocaleTranslations;
+  },
+  locale: SupportedLocale,
+  field: keyof LocaleTranslations[string],
+  fallback = ""
+) {
+  const translated = entity.translations?.[locale]?.[field];
+  return translated?.trim() || fallback;
+}
+
+function normalizeArchiveGoals(snapshot: ArchivedSnapshot): DashboardSnapshot["goals"] {
+  const goals = snapshot.goals ?? [];
+  if (goals.every((goal) => Array.isArray(goal.milestones))) {
+    return goals as DashboardSnapshot["goals"];
+  }
+
+  const milestones = snapshot.milestones ?? [];
+  const cards = snapshot.cards ?? [];
+
+  return goals.map((goal) => ({
+    ...goal,
+    milestones: milestones
+      .filter((milestone) => milestone.goalId === goal.id)
+      .map((milestone) => ({
+        ...milestone,
+        cards: milestone.cards ?? cards.filter((card) => card.milestoneId === milestone.id),
+      })),
+  })) as DashboardSnapshot["goals"];
 }
 
 async function patchJson<T>(url: string, body: unknown): Promise<T> {
@@ -140,10 +162,7 @@ async function patchJson<T>(url: string, body: unknown): Promise<T> {
     body: JSON.stringify(body),
   });
 
-  if (!response.ok) {
-    throw new Error(await response.text());
-  }
-
+  if (!response.ok) throw new Error(await response.text());
   return response.json() as Promise<T>;
 }
 
@@ -152,9 +171,14 @@ export function DashboardApp({
 }: {
   initialSnapshot: DashboardSnapshot;
 }) {
+  const { locale, messages: m, timeZone } = useLocale();
   const [snapshot, setSnapshot] = React.useState(initialSnapshot);
+  const [mainTab, setMainTab] = React.useState("active");
   const [planOpen, setPlanOpen] = React.useState(true);
   const [planWidth, setPlanWidth] = React.useState(DEFAULT_PLAN_WIDTH);
+  const [selectedArchiveId, setSelectedArchiveId] = React.useState(
+    initialSnapshot.archives[0]?.id ?? ""
+  );
 
   const refresh = React.useCallback(async () => {
     const response = await fetch("/api/dashboard/snapshot", {
@@ -179,12 +203,8 @@ export function DashboardApp({
       CardPriority | undefined,
     ];
 
-    if (
-      !statusRows.some((row) => row.id === status) ||
-      !priorityColumns.some((column) => column.id === priority)
-    ) {
-      return;
-    }
+    if (!status || !priority) return;
+    if (!statuses.includes(status) || !priorities.includes(priority)) return;
 
     await patchJson(`/api/cards/${cardId}`, { status, priority });
     await refresh();
@@ -195,21 +215,18 @@ export function DashboardApp({
     setPlanOpen(true);
   }
 
-  function closePlanSidebar() {
-    setPlanOpen(false);
-  }
-
   function startPlanResize(event: React.PointerEvent<HTMLButtonElement>) {
     event.preventDefault();
     const startX = event.clientX;
     const startWidth = planWidth;
 
     const move = (moveEvent: PointerEvent) => {
-      const next = Math.min(
-        MAX_PLAN_WIDTH,
-        Math.max(MIN_PLAN_WIDTH, startWidth + moveEvent.clientX - startX)
+      setPlanWidth(
+        Math.min(
+          MAX_PLAN_WIDTH,
+          Math.max(MIN_PLAN_WIDTH, startWidth + moveEvent.clientX - startX)
+        )
       );
-      setPlanWidth(next);
     };
     const stop = () => {
       window.removeEventListener("pointermove", move);
@@ -221,205 +238,368 @@ export function DashboardApp({
   }
 
   const doingCards = snapshot.cards.filter((card) => card.status === "doing");
-  return (
-    <main className="flex min-h-screen flex-col bg-background text-foreground">
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-4">
-        <div className="flex min-w-0 items-center gap-2">
-          <LayoutDashboard className="size-5 text-accent-cyan" />
-          <div className="min-w-0">
-            <h1 className="truncate text-sm font-semibold">
-              Vibe with Dashboard
-            </h1>
-            <p className="truncate font-mono text-[11px] text-muted-foreground">
-              {snapshot.launch.dashboardUrl}
-            </p>
-          </div>
-        </div>
 
-        <div className="ml-auto flex items-center gap-2">
-          <StatusPill
-            icon={<SquareKanban className="size-3.5" />}
-            label="monitoring"
-            tone="info"
-          />
-          <StatusPill
-            icon={<Bot className="size-3.5" />}
-            label="$vibe-with-dashboard"
-            tone="good"
-          />
-          {!planOpen && (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    onClick={openPlanSidebar}
-                    aria-label="Plan 열기"
-                  >
-                    <PanelLeftOpen className="size-4" />
-                  </Button>
-                }
-              />
-              <TooltipContent>Plan 열기</TooltipContent>
-            </Tooltip>
-          )}
-          <Tooltip>
-            <TooltipTrigger
-              render={
+  return (
+    <main className="min-h-screen bg-background text-foreground">
+      <Tabs
+        value={mainTab}
+        onValueChange={setMainTab}
+        className="flex min-h-screen flex-col"
+      >
+        <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-4">
+          <div className="flex min-w-0 items-center gap-2">
+            <LayoutDashboard className="size-5 text-accent-cyan" />
+            <div className="min-w-0">
+              <h1 className="truncate text-sm font-semibold">
+                Vibe with Dashboard
+              </h1>
+              <p className="truncate font-mono text-[11px] text-muted-foreground">
+                {snapshot.launch.dashboardUrl}
+              </p>
+            </div>
+          </div>
+
+          <TabsList className="ml-2">
+            <TabsTrigger value="active">
+              <SquareKanban className="size-4" />
+              {m.active}
+            </TabsTrigger>
+            <TabsTrigger value="archive">
+              <Archive className="size-4" />
+              {m.archive}
+            </TabsTrigger>
+          </TabsList>
+
+          <div className="ml-auto flex items-center gap-2">
+            {!planOpen && mainTab === "active" && (
+              <IconTip label={m.openPlan}>
                 <Button
                   type="button"
                   variant="outline"
                   size="icon"
-                  onClick={refresh}
-                  aria-label="새로고침"
+                  onClick={openPlanSidebar}
+                  aria-label={m.openPlan}
                 >
-                  <RefreshCw className="size-4" />
+                  <PanelLeftOpen className="size-4" />
                 </Button>
-              }
+              </IconTip>
+            )}
+            <IconTip label={m.refresh}>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                onClick={refresh}
+                aria-label={m.refresh}
+              >
+                <RefreshCw className="size-4" />
+              </Button>
+            </IconTip>
+            <ThemeToggle label={m.theme} />
+            <ActivitySheet
+              activities={snapshot.activityEntries}
+              cards={snapshot.cards}
+              doingCount={doingCards.length}
+              locale={locale}
+              messages={m}
+              timeZone={timeZone}
             />
-            <TooltipContent>새로고침</TooltipContent>
-          </Tooltip>
-          <ThemeToggle />
-          <Sheet>
-            <SheetTrigger
-              render={
-                <Button type="button" variant="outline" size="sm">
-                  <Activity className="size-4" />
-                  Activity
-                </Button>
-              }
-            />
-            <SheetContent className="z-[60] w-[min(620px,96vw)] border-l border-border sm:max-w-none">
-              <SheetHeader className="border-b border-border">
-                <SheetTitle>Activity Timeline</SheetTitle>
-                <SheetDescription>
-                  Agent 작업 단계와 dashboard 기록.
-                </SheetDescription>
-              </SheetHeader>
-              <ScrollArea className="min-h-0 flex-1">
-                <div className="space-y-4 p-4">
-                  <SummaryStrip
-                    cards={snapshot.cards}
-                    doingCount={doingCards.length}
-                    activityCount={snapshot.activityEntries.length}
-                  />
-                  <ActivityFeed activities={snapshot.activityEntries} />
-                </div>
-              </ScrollArea>
-            </SheetContent>
-          </Sheet>
-          <Sheet>
-            <SheetTrigger
-              render={
-                <Button type="button" variant="outline" size="sm">
-                  <Settings2 className="size-4" />
-                  Inspector
-                </Button>
-              }
-            />
-            <SheetContent className="z-[60] w-[min(780px,96vw)] border-l border-border sm:max-w-none">
-              <SheetHeader className="border-b border-border">
-                <SheetTitle>Inspector</SheetTitle>
-                <SheetDescription>
-                  Repo, GitHub, design, harness, skills, MCP, subagents snapshot.
-                </SheetDescription>
-              </SheetHeader>
-              <Inspector snapshot={snapshot} />
-            </SheetContent>
-          </Sheet>
-        </div>
-      </header>
+            <InspectorSheet snapshot={snapshot} messages={m} />
+          </div>
+        </header>
 
-      <div className="flex min-h-0 flex-1">
-        {planOpen ? (
-          <section
-            data-testid="plan-sidebar"
-            className="relative min-h-0 shrink-0 border-r border-border bg-background"
-            style={{ width: planWidth }}
-          >
-          <PanelHeader
-            icon={<Workflow className="size-4" />}
-            title="Plan"
-            meta={snapshot.board.isEmpty ? "empty" : `${snapshot.goals.length} goals`}
-            action={
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={closePlanSidebar}
-                      aria-label="Plan 접기"
-                    >
-                      <PanelLeftClose className="size-4" />
-                    </Button>
-                  }
-                />
-                <TooltipContent>Plan 접기</TooltipContent>
-              </Tooltip>
-            }
+        <TabsContent value="active" className="m-0 min-h-0 flex-1">
+          <ActiveBoard
+            handleDragEnd={handleDragEnd}
+            locale={locale}
+            messages={m}
+            planOpen={planOpen}
+            planWidth={planWidth}
+            setPlanOpen={setPlanOpen}
+            snapshot={snapshot}
+            startPlanResize={startPlanResize}
           />
-          <ScrollArea className="h-[calc(100vh-7.5rem)]">
-            <PlanPanel snapshot={snapshot} />
-          </ScrollArea>
-          </section>
-        ) : (
-          <button
-            type="button"
-            onClick={openPlanSidebar}
-            className="flex w-11 shrink-0 items-center justify-center border-r border-border bg-muted/10 text-muted-foreground hover:bg-muted/20 hover:text-foreground"
-            aria-label="Plan 열기"
-          >
-            <PanelLeftOpen className="size-4" />
-          </button>
-        )}
+        </TabsContent>
 
-        {planOpen && (
-          <button
-            type="button"
-            aria-label="Plan 폭 조절"
-            onPointerDown={startPlanResize}
-            className="z-10 w-1 shrink-0 cursor-col-resize bg-transparent hover:bg-accent-cyan/40 focus-visible:bg-accent-cyan/50 focus-visible:outline-none"
+        <TabsContent value="archive" className="m-0 min-h-0 flex-1">
+          <ArchiveBoard
+            archives={snapshot.archives}
+            locale={locale}
+            messages={m}
+            selectedArchiveId={selectedArchiveId}
+            setSelectedArchiveId={setSelectedArchiveId}
+            timeZone={timeZone}
           />
-        )}
-
-        <section className="min-w-0 flex-1 border-b border-border xl:border-b-0">
-          <PanelHeader
-            icon={<SquareKanban className="size-4" />}
-            title="Kanban"
-            meta={
-              snapshot.board.archiveReady
-                ? "archive ready"
-                : "현재 처리 지점 + 세로 실행 단계"
-            }
-          />
-          <ScrollArea className="h-[calc(100vh-7.5rem)]">
-            <div className="space-y-4 p-4">
-              <CurrentWorkVisual snapshot={snapshot} />
-              <DndContext id="dashboard-kanban" onDragEnd={handleDragEnd}>
-                <KanbanMatrix cards={snapshot.cards} />
-              </DndContext>
-            </div>
-          </ScrollArea>
-        </section>
-      </div>
+        </TabsContent>
+      </Tabs>
     </main>
   );
 }
 
-function PanelHeader({
-  icon,
-  title,
-  meta,
-  action,
+function ActiveBoard({
+  handleDragEnd,
+  locale,
+  messages,
+  planOpen,
+  planWidth,
+  setPlanOpen,
+  snapshot,
+  startPlanResize,
 }: {
-  icon: React.ReactNode;
-  title: string;
-  meta: string;
+  handleDragEnd: (event: DragEndEvent) => Promise<void>;
+  locale: SupportedLocale;
+  messages: DashboardMessages;
+  planOpen: boolean;
+  planWidth: number;
+  setPlanOpen: (open: boolean) => void;
+  snapshot: DashboardSnapshot;
+  startPlanResize: (event: React.PointerEvent<HTMLButtonElement>) => void;
+}) {
+  return (
+    <div className="flex min-h-0 flex-1">
+      {planOpen ? (
+        <section
+          data-testid="plan-sidebar"
+          className="relative min-h-0 shrink-0 border-r border-border bg-background"
+          style={{ width: planWidth }}
+        >
+          <PanelHeader
+            action={
+              <IconTip label={messages.closePlan}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setPlanOpen(false)}
+                  aria-label={messages.closePlan}
+                >
+                  <PanelLeftClose className="size-4" />
+                </Button>
+              </IconTip>
+            }
+            icon={<Workflow className="size-4" />}
+            meta={snapshot.board.isEmpty ? messages.empty : snapshot.board.status}
+            title={messages.plan}
+          />
+          <ScrollArea className="h-[calc(100vh-7.5rem)]">
+            <PlanPanel locale={locale} messages={messages} snapshot={snapshot} />
+          </ScrollArea>
+        </section>
+      ) : (
+        <button
+          type="button"
+          onClick={() => {
+            setPlanOpen(true);
+          }}
+          className="flex w-11 shrink-0 items-center justify-center border-r border-border bg-muted/10 text-muted-foreground hover:bg-muted/20 hover:text-foreground"
+          aria-label={messages.openPlan}
+        >
+          <PanelLeftOpen className="size-4" />
+        </button>
+      )}
+
+      {planOpen && (
+        <button
+          type="button"
+          aria-label={messages.resizePlan}
+          onPointerDown={startPlanResize}
+          className="z-10 w-1 shrink-0 cursor-col-resize bg-transparent hover:bg-accent-cyan/40 focus-visible:bg-accent-cyan/50 focus-visible:outline-none"
+        />
+      )}
+
+      <section className="min-w-0 flex-1">
+        <PanelHeader
+          icon={<SquareKanban className="size-4" />}
+          meta={snapshot.board.archiveReady ? messages.archiveReady : messages.current}
+          title={messages.kanban}
+        />
+        <ScrollArea className="h-[calc(100vh-7.5rem)]">
+          <div className="space-y-4 p-4">
+            <CurrentWorkVisual
+              locale={locale}
+              messages={messages}
+              snapshot={snapshot}
+            />
+            <DndContext id="dashboard-kanban" onDragEnd={handleDragEnd}>
+              <KanbanMatrix
+                cards={snapshot.cards}
+                locale={locale}
+                messages={messages}
+              />
+            </DndContext>
+          </div>
+        </ScrollArea>
+      </section>
+    </div>
+  );
+}
+
+function ArchiveBoard({
+  archives,
+  locale,
+  messages,
+  selectedArchiveId,
+  setSelectedArchiveId,
+  timeZone,
+}: {
+  archives: ArchiveRecord[];
+  locale: SupportedLocale;
+  messages: DashboardMessages;
+  selectedArchiveId: string;
+  setSelectedArchiveId: (id: string) => void;
+  timeZone: string;
+}) {
+  if (archives.length === 0) {
+    return (
+      <div className="flex h-[calc(100vh-3.5rem)] items-center justify-center text-sm text-muted-foreground">
+        {messages.noArchivedBoards}
+      </div>
+    );
+  }
+
+  const selected = archives.find((archive) => archive.id === selectedArchiveId) ?? archives[0];
+  const snapshot = readArchiveSnapshot(selected);
+  const cards = snapshot.cards ?? [];
+  const activities = snapshot.activityEntries ?? [];
+  const archiveGoals = normalizeArchiveGoals(snapshot);
+
+  return (
+    <div className="grid h-[calc(100vh-3.5rem)] grid-cols-[20rem_1fr]">
+      <aside className="border-r border-border">
+        <PanelHeader
+          icon={<Archive className="size-4" />}
+          meta={String(archives.length)}
+          title={messages.archive}
+        />
+        <ScrollArea className="h-[calc(100vh-6.5rem)]">
+          <div className="space-y-2 p-3">
+            {archives.map((archive) => (
+              <ArchiveListItem
+                archive={archive}
+                isSelected={archive.id === selected.id}
+                key={archive.id}
+                locale={locale}
+                messages={messages}
+                onSelect={() => setSelectedArchiveId(archive.id)}
+                timeZone={timeZone}
+              />
+            ))}
+          </div>
+        </ScrollArea>
+      </aside>
+
+      <ScrollArea className="h-[calc(100vh-3.5rem)]">
+        <div className="space-y-4 p-4">
+          <section className="rounded-md border border-border bg-muted/10 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="truncate text-sm font-semibold">
+                  {snapshot.board
+                    ? localizedText(
+                        snapshot.board,
+                        locale,
+                        "title",
+                        snapshot.board.title
+                      )
+                    : selected.title}
+                </h2>
+                <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                  {snapshot.board
+                    ? localizedText(
+                        snapshot.board,
+                        locale,
+                        "task",
+                        snapshot.board.task
+                      )
+                    : selected.task || messages.archived}
+                </p>
+              </div>
+              <Badge variant="secondary">{messages.archived}</Badge>
+            </div>
+          </section>
+
+          <div className="grid gap-4 xl:grid-cols-[minmax(18rem,0.44fr)_minmax(34rem,1fr)]">
+            <ArchivePlan goals={archiveGoals} locale={locale} messages={messages} />
+            <KanbanMatrix
+              cards={cards}
+              locale={locale}
+              messages={messages}
+              readOnly
+            />
+          </div>
+
+          <section className="rounded-md border border-border p-3">
+            <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
+              <Activity className="size-4 text-accent-cyan" />
+              {messages.activity}
+            </div>
+            <ActivityFeed
+              activities={activities.slice(0, 10)}
+              locale={locale}
+              messages={messages}
+              timeZone={timeZone}
+            />
+          </section>
+        </div>
+      </ScrollArea>
+    </div>
+  );
+}
+
+function ArchiveListItem({
+  archive,
+  isSelected,
+  locale,
+  messages,
+  onSelect,
+  timeZone,
+}: {
+  archive: ArchiveRecord;
+  isSelected: boolean;
+  locale: SupportedLocale;
+  messages: DashboardMessages;
+  onSelect: () => void;
+  timeZone: string;
+}) {
+  const snapshot = readArchiveSnapshot(archive);
+  const title = snapshot.board
+    ? localizedText(snapshot.board, locale, "title", snapshot.board.title)
+    : archive.title;
+  const task = snapshot.board
+    ? localizedText(snapshot.board, locale, "task", snapshot.board.task)
+    : archive.task;
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={`w-full rounded-md border p-3 text-left transition-colors ${
+        isSelected
+          ? "border-accent-cyan bg-accent-cyan/10"
+          : "border-border bg-background hover:bg-muted/20"
+      }`}
+    >
+      <div className="truncate text-sm font-medium">{title}</div>
+      <div className="mt-1 truncate text-xs text-muted-foreground">
+        {task || messages.archived}
+      </div>
+      <div className="mt-2 font-mono text-[10px] text-muted-foreground">
+        {formatTime(archive.createdAt, locale, timeZone)}
+      </div>
+    </button>
+  );
+}
+
+function PanelHeader({
+  action,
+  icon,
+  meta,
+  title,
+}: {
   action?: React.ReactNode;
+  icon: React.ReactNode;
+  meta: string;
+  title: string;
 }) {
   return (
     <div className="flex h-12 items-center gap-2 border-b border-border px-4">
@@ -433,56 +613,23 @@ function PanelHeader({
   );
 }
 
-function StatusPill({
-  icon,
-  label,
-  tone,
+function PlanPanel({
+  locale,
+  messages,
+  snapshot,
 }: {
-  icon: React.ReactNode;
-  label: string;
-  tone: "good" | "info" | "muted";
+  locale: SupportedLocale;
+  messages: DashboardMessages;
+  snapshot: DashboardSnapshot;
 }) {
-  const className =
-    tone === "good"
-      ? "border-status-done/30 bg-status-done/10 text-status-done"
-      : tone === "info"
-        ? "border-accent-cyan/30 bg-accent-cyan/10 text-accent-cyan"
-        : "border-border bg-muted/40 text-muted-foreground";
-
-  return (
-    <span
-      className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2 text-xs ${className}`}
-    >
-      {icon}
-      {label}
-    </span>
-  );
-}
-
-function PlanPanel({ snapshot }: { snapshot: DashboardSnapshot }) {
   if (snapshot.goals.length === 0) {
     return (
-      <div className="space-y-4 p-4">
+      <div className="p-4">
         <section className="rounded-md border border-border bg-muted/15 p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <h2 className="text-sm font-semibold">활성 계획 없음</h2>
-              <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                `$vibe-with-dashboard plan --task ...`가 실행되면 현재 작업의
-                goal, milestone, card가 여기에 나타난다.
-              </p>
-            </div>
-            <Badge variant="outline">empty</Badge>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold">{messages.noActivePlan}</h2>
+            <Badge variant="outline">{messages.empty}</Badge>
           </div>
-        </section>
-        <section className="rounded-md border border-border bg-background p-3">
-          <div className="text-xs font-semibold">Archive</div>
-          <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
-            완료된 board는 archive 후 active board에서 사라진다.
-          </p>
-          <Badge variant="secondary" className="mt-3">
-            {snapshot.archives.length} archived
-          </Badge>
         </section>
       </div>
     );
@@ -494,83 +641,161 @@ function PlanPanel({ snapshot }: { snapshot: DashboardSnapshot }) {
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <h2 className="truncate text-sm font-semibold">
-              {snapshot.board.title}
+              {localizedText(
+                snapshot.board,
+                locale,
+                "title",
+                snapshot.board.title
+              )}
             </h2>
-            <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
-              {snapshot.board.task || "현재 board task 없음"}
-            </p>
+            {snapshot.board.task && (
+              <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                {localizedText(
+                  snapshot.board,
+                  locale,
+                  "task",
+                  snapshot.board.task
+                )}
+              </p>
+            )}
           </div>
           <Badge variant={snapshot.board.archiveReady ? "default" : "outline"}>
-            {snapshot.board.archiveReady ? "archive ready" : snapshot.board.status}
+            {snapshot.board.archiveReady ? messages.archiveReady : snapshot.board.status}
           </Badge>
         </div>
       </section>
-      {snapshot.goals.map((goal) => (
-        <section key={goal.id} className="space-y-3">
-          <div className="rounded-md border border-border bg-muted/15 p-3">
+      <PlanTree goals={snapshot.goals} locale={locale} messages={messages} />
+    </div>
+  );
+}
+
+function ArchivePlan({
+  goals,
+  locale,
+  messages,
+}: {
+  goals: DashboardSnapshot["goals"];
+  locale: SupportedLocale;
+  messages: DashboardMessages;
+}) {
+  return (
+    <section className="rounded-md border border-border">
+      <PanelHeader
+        icon={<Workflow className="size-4" />}
+        meta={String(goals.length)}
+        title={messages.plan}
+      />
+      <div className="p-4">
+        {goals.length === 0 ? (
+          <p className="text-sm text-muted-foreground">{messages.noActivePlan}</p>
+        ) : (
+          <PlanTree goals={goals} locale={locale} messages={messages} />
+        )}
+      </div>
+    </section>
+  );
+}
+
+function PlanTree({
+  goals,
+  locale,
+  messages,
+}: {
+  goals: DashboardSnapshot["goals"];
+  locale: SupportedLocale;
+  messages: DashboardMessages;
+}) {
+  return (
+    <div className="space-y-3">
+      {goals.map((goal) => (
+        <section key={goal.id} className="space-y-2">
+          <article className="rounded-md border border-border bg-background p-3">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <h2 className="text-sm font-semibold">{goal.title}</h2>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                  {goal.summary}
-                </p>
+                <h3 className="truncate text-sm font-semibold">
+                  {localizedText(goal, locale, "title", goal.title)}
+                </h3>
+                {goal.summary && (
+                  <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                    {localizedText(goal, locale, "summary", goal.summary)}
+                  </p>
+                )}
               </div>
               <Badge variant="secondary">{goal.status}</Badge>
             </div>
-          </div>
+          </article>
 
-          <div className="space-y-2">
-            {goal.milestones.map((milestone) => (
-              <article
-                key={milestone.id}
-                className="rounded-md border border-border bg-background p-3"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <h3 className="text-xs font-semibold">{milestone.title}</h3>
-                    <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
-                      {milestone.summary}
+          {goal.milestones.map((milestone) => (
+            <article
+              key={milestone.id}
+              className="rounded-md border border-border bg-muted/10 p-3"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h4 className="truncate text-xs font-semibold">
+                    {localizedText(
+                      milestone,
+                      locale,
+                      "title",
+                      milestone.title === "Current work"
+                        ? messages.current
+                        : milestone.title
+                    )}
+                  </h4>
+                  {milestone.summary && (
+                    <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">
+                      {localizedText(
+                        milestone,
+                        locale,
+                        "summary",
+                        milestone.summary
+                      )}
                     </p>
+                  )}
+                </div>
+                <Badge variant="outline">{milestone.priority}</Badge>
+              </div>
+              <div className="mt-3 grid gap-2">
+                {milestone.cards.slice(0, 4).map((card) => (
+                  <div
+                    key={card.id}
+                    className="flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5"
+                  >
+                    <CircleDot className="size-3 text-accent-cyan" />
+                    <span className="min-w-0 flex-1 truncate text-[11px]">
+                      {localizedText(card, locale, "title", card.title)}
+                    </span>
+                    <Badge variant="secondary" className="text-[10px]">
+                      {messages.status[card.status as CardStatus] ?? card.status}
+                    </Badge>
                   </div>
-                  <Badge variant="outline">{milestone.priority}</Badge>
-                </div>
-                <div className="mt-3 grid gap-2">
-                  {milestone.cards.slice(0, 4).map((card) => (
-                    <div
-                      key={card.id}
-                      className="flex items-center gap-2 rounded-md border border-border bg-muted/10 px-2 py-1.5"
-                    >
-                      <CircleDot className="size-3 text-accent-cyan" />
-                      <span className="min-w-0 flex-1 truncate text-[11px]">
-                        {card.title}
-                      </span>
-                      <Badge variant="secondary" className="text-[10px]">
-                        {card.status}
-                      </Badge>
-                    </div>
-                  ))}
-                </div>
-              </article>
-            ))}
-          </div>
+                ))}
+              </div>
+            </article>
+          ))}
         </section>
       ))}
     </div>
   );
 }
 
-function CurrentWorkVisual({ snapshot }: { snapshot: DashboardSnapshot }) {
+function CurrentWorkVisual({
+  locale,
+  messages,
+  snapshot,
+}: {
+  locale: SupportedLocale;
+  messages: DashboardMessages;
+  snapshot: DashboardSnapshot;
+}) {
   const latest = snapshot.activityEntries[0];
-  const doing = snapshot.cards.find((card) => card.status === "doing");
-  const review = snapshot.cards.find((card) => card.status === "review");
-  const focusCard = doing ?? review ?? snapshot.cards.find((card) => card.status === "ready");
-  const phases = ["start", "plan", "implement", "verify", "result"] as const;
+  const focusCard =
+    snapshot.cards.find((card) => card.status === "doing") ??
+    snapshot.cards.find((card) => card.status === "review") ??
+    snapshot.cards.find((card) => card.status === "ready");
   const currentPhase = latest?.phase === "fail" ? "verify" : latest?.phase ?? "start";
-  const phaseIndex = Math.max(
-    0,
-    phases.findIndex((phase) => phase === currentPhase)
-  );
-  const progress = phases.length > 1 ? (phaseIndex / (phases.length - 1)) * 100 : 0;
+  const phaseIndex = Math.max(0, phases.findIndex((phase) => phase === currentPhase));
+  const progress = (phaseIndex / (phases.length - 1)) * 100;
 
   return (
     <section className="rounded-md border border-border bg-muted/10 p-3">
@@ -578,22 +803,15 @@ function CurrentWorkVisual({ snapshot }: { snapshot: DashboardSnapshot }) {
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-sm font-semibold">
             <Activity className="size-4 text-accent-cyan" />
-            현재 처리 지점
+            {messages.current}
           </div>
           <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-      {latest
-              ? latest.message
-              : "아직 기록된 activity가 없다. $vibe-with-dashboard 작업이 시작되면 여기에 표시된다."}
+            {latest
+              ? localizedText(latest, locale, "message", latest.message)
+              : messages.noActivity}
           </p>
         </div>
-        <div className="flex flex-wrap gap-1">
-          {latest && <PhaseBadge phase={latest.phase} />}
-          {latest?.task && (
-            <Badge variant="outline" className="font-mono text-[10px]">
-              {latest.task}
-            </Badge>
-          )}
-        </div>
+        {latest && <PhaseBadge messages={messages} phase={latest.phase} />}
       </div>
 
       <div className="mt-4">
@@ -627,7 +845,7 @@ function CurrentWorkVisual({ snapshot }: { snapshot: DashboardSnapshot }) {
                   {complete ? <CheckCircle2 className="size-3" /> : index + 1}
                 </span>
                 <span className="truncate text-[10px] text-muted-foreground">
-                  {phaseLabels[phase]}
+                  {messages.phase[phase]}
                 </span>
               </div>
             );
@@ -635,59 +853,65 @@ function CurrentWorkVisual({ snapshot }: { snapshot: DashboardSnapshot }) {
         </div>
       </div>
 
-      <div className="mt-4 grid gap-2 md:grid-cols-[1fr_auto]">
-        <div className="rounded-md border border-border bg-background p-3">
-          <div className="text-[11px] text-muted-foreground">Focus card</div>
-          <div className="mt-1 truncate text-sm font-medium">
-            {focusCard?.title ?? "대기 중"}
-          </div>
+      <div className="mt-4 rounded-md border border-border bg-background p-3">
+        <div className="text-[11px] text-muted-foreground">{messages.focus}</div>
+        <div className="mt-1 truncate text-sm font-medium">
+          {focusCard
+            ? localizedText(focusCard, locale, "title", focusCard.title)
+            : messages.waiting}
+        </div>
+        {focusCard?.summary && (
           <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-            {focusCard?.summary ?? "Doing 또는 Review 카드가 생기면 자동으로 잡힌다."}
+            {localizedText(focusCard, locale, "summary", focusCard.summary)}
           </p>
-        </div>
-        <div className="grid grid-cols-3 gap-2 md:w-56">
-          <MetricTile
-            label="Doing"
-            value={String(snapshot.cards.filter((card) => card.status === "doing").length)}
-          />
-          <MetricTile
-            label="Review"
-            value={String(snapshot.cards.filter((card) => card.status === "review").length)}
-          />
-          <MetricTile
-            label="Done"
-            value={String(snapshot.cards.filter((card) => card.status === "done").length)}
-          />
-        </div>
+        )}
       </div>
     </section>
   );
 }
 
-function KanbanMatrix({ cards }: { cards: DashboardCard[] }) {
+function KanbanMatrix({
+  cards,
+  locale,
+  messages,
+  readOnly = false,
+}: {
+  cards: DashboardCard[];
+  locale: SupportedLocale;
+  messages: DashboardMessages;
+  readOnly?: boolean;
+}) {
+  if (cards.length === 0) {
+    return (
+      <section className="rounded-md border border-border p-4 text-sm text-muted-foreground">
+        {messages.noCards}
+      </section>
+    );
+  }
+
   return (
     <section className="space-y-2">
       <div className="grid grid-cols-[7.5rem_1fr] gap-2 rounded-md border border-border bg-muted/10 p-2 text-[11px] text-muted-foreground">
         <div className="flex items-center gap-1">
           <Workflow className="size-3.5" />
-          실행 단계
+          {messages.workflow}
         </div>
-        <div className="grid grid-cols-3 gap-2">
-          {priorityColumns.map((priority) => (
-            <div key={priority.id} className="flex items-center justify-between">
-              <span className="font-medium text-foreground">{priority.label}</span>
-              <span>{priority.hint}</span>
-            </div>
-          ))}
+        <div className="grid grid-cols-3 gap-2 font-medium text-foreground">
+          <span>{messages.high}</span>
+          <span>{messages.medium}</span>
+          <span>{messages.low}</span>
         </div>
       </div>
 
       <div className="space-y-3">
-        {statusRows.map((row) => (
+        {statuses.map((status) => (
           <KanbanRow
-            key={row.id}
-            row={row}
-            cards={cards.filter((card) => card.status === row.id)}
+            key={status}
+            cards={cards.filter((card) => card.status === status)}
+            locale={locale}
+            messages={messages}
+            readOnly={readOnly}
+            status={status}
           />
         ))}
       </div>
@@ -696,21 +920,27 @@ function KanbanMatrix({ cards }: { cards: DashboardCard[] }) {
 }
 
 function KanbanRow({
-  row,
   cards,
+  locale,
+  messages,
+  readOnly,
+  status,
 }: {
-  row: (typeof statusRows)[number];
   cards: DashboardCard[];
+  locale: SupportedLocale;
+  messages: DashboardMessages;
+  readOnly: boolean;
+  status: CardStatus;
 }) {
   return (
     <div
-      className={`grid min-h-36 grid-cols-[7.5rem_1fr] gap-2 rounded-md border border-border p-2 ${row.color}`}
+      className={`grid min-h-32 grid-cols-[7.5rem_1fr] gap-2 rounded-md border border-border p-2 ${statusTone[status]}`}
     >
       <div className="flex flex-col justify-between rounded-md bg-background/70 p-2">
         <div>
-          <span className="text-xs font-semibold">{row.label}</span>
-          <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
-            {row.hint}
+          <span className="text-xs font-semibold">{messages.status[status]}</span>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            {messages.statusHint[status]}
           </p>
         </div>
         <Badge variant="secondary" className="w-fit">
@@ -718,12 +948,15 @@ function KanbanRow({
         </Badge>
       </div>
       <div className="grid grid-cols-3 gap-2">
-        {priorityColumns.map((priority) => (
+        {priorities.map((priority) => (
           <KanbanCell
-            key={priority.id}
-            status={row.id}
-            priority={priority.id}
-            cards={cards.filter((card) => card.priority === priority.id)}
+            key={priority}
+            cards={cards.filter((card) => card.priority === priority)}
+            locale={locale}
+            messages={messages}
+            priority={priority}
+            readOnly={readOnly}
+            status={status}
           />
         ))}
       </div>
@@ -732,48 +965,62 @@ function KanbanRow({
 }
 
 function KanbanCell({
-  status,
-  priority,
   cards,
+  locale,
+  messages,
+  priority,
+  readOnly,
+  status,
 }: {
-  status: CardStatus;
-  priority: CardPriority;
   cards: DashboardCard[];
+  locale: SupportedLocale;
+  messages: DashboardMessages;
+  priority: CardPriority;
+  readOnly: boolean;
+  status: CardStatus;
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id: `${status}:${priority}` });
+  const { setNodeRef, isOver } = useDroppable({
+    disabled: readOnly,
+    id: `${status}:${priority}`,
+  });
 
   return (
     <div
       ref={setNodeRef}
-      className={`min-h-28 space-y-2 rounded-md border border-dashed border-border/70 bg-background/35 p-2 ${
+      className={`min-h-24 space-y-2 rounded-md border border-dashed border-border/70 bg-background/35 p-2 ${
         isOver ? "ring-2 ring-ring" : ""
       }`}
     >
-      {cards.map((card) => (
-        <DraggableCard key={card.id} card={card} />
-      ))}
+      {cards.map((card) =>
+        readOnly ? (
+          <StaticCard key={card.id} card={card} locale={locale} />
+        ) : (
+          <DraggableCard key={card.id} card={card} locale={locale} />
+        )
+      )}
       {cards.length === 0 && (
-        <div className="flex h-16 items-center justify-center text-[11px] text-muted-foreground">
-          비어 있음
+        <div className="flex h-14 items-center justify-center text-[11px] text-muted-foreground">
+          {messages.empty}
         </div>
       )}
     </div>
   );
 }
 
-function DraggableCard({ card }: { card: DashboardCard }) {
+function DraggableCard({
+  card,
+  locale,
+}: {
+  card: DashboardCard;
+  locale: SupportedLocale;
+}) {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
-    useDraggable({
-      id: card.id,
-    });
-  const style = {
-    transform: CSS.Translate.toString(transform),
-  };
+    useDraggable({ id: card.id });
 
   return (
     <article
       ref={setNodeRef}
-      style={style}
+      style={{ transform: CSS.Translate.toString(transform) }}
       className={`rounded-md border border-border bg-background p-2 shadow-sm ${
         isDragging ? "opacity-60" : ""
       }`}
@@ -782,54 +1029,136 @@ function DraggableCard({ card }: { card: DashboardCard }) {
         <button
           type="button"
           className="mt-0.5 text-muted-foreground"
-          aria-label="카드 이동"
+          aria-label={dashboardMessages[locale].moveCard}
           {...listeners}
           {...attributes}
         >
           <GripVertical className="size-3.5" />
         </button>
-        <div className="min-w-0 flex-1">
-          <h3 className="text-xs font-medium leading-5">{card.title}</h3>
-          <p className="line-clamp-3 text-[11px] leading-4 text-muted-foreground">
-            {card.summary}
-          </p>
-          <div className="mt-2 flex flex-wrap gap-1">
-            <Badge variant="outline" className="text-[10px]">
-              {card.size}
-            </Badge>
-            <Badge variant="secondary" className="text-[10px]">
-              {card.owner}
-            </Badge>
-          </div>
-          {card.verificationCommand && (
-            <p className="mt-2 truncate font-mono text-[10px] text-muted-foreground">
-              {card.verificationCommand}
-            </p>
-          )}
-        </div>
+        <CardBody card={card} locale={locale} />
       </div>
     </article>
   );
 }
 
-function SummaryStrip({
+function StaticCard({
+  card,
+  locale,
+}: {
+  card: DashboardCard;
+  locale: SupportedLocale;
+}) {
+  return (
+    <article className="rounded-md border border-border bg-background p-2 shadow-sm">
+      <CardBody card={card} locale={locale} />
+    </article>
+  );
+}
+
+function CardBody({
+  card,
+  locale,
+}: {
+  card: DashboardCard;
+  locale: SupportedLocale;
+}) {
+  return (
+    <div className="min-w-0 flex-1">
+      <h3 className="text-xs font-medium leading-5">
+        {localizedText(card, locale, "title", card.title)}
+      </h3>
+      {card.summary && (
+        <p className="line-clamp-3 text-[11px] leading-4 text-muted-foreground">
+          {localizedText(card, locale, "summary", card.summary)}
+        </p>
+      )}
+      <div className="mt-2 flex flex-wrap gap-1">
+        <Badge variant="outline" className="text-[10px]">
+          {card.size}
+        </Badge>
+        <Badge variant="secondary" className="text-[10px]">
+          {card.owner}
+        </Badge>
+      </div>
+      {card.verificationCommand && (
+        <p className="mt-2 truncate font-mono text-[10px] text-muted-foreground">
+          {card.verificationCommand}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ActivitySheet({
+  activities,
   cards,
   doingCount,
-  activityCount,
+  locale,
+  messages,
+  timeZone,
 }: {
+  activities: DashboardActivity[];
   cards: DashboardCard[];
   doingCount: number;
+  locale: SupportedLocale;
+  messages: DashboardMessages;
+  timeZone: string;
+}) {
+  return (
+    <Sheet>
+      <SheetTrigger
+        render={
+          <Button type="button" variant="outline" size="sm">
+            <Activity className="size-4" />
+            {messages.activity}
+          </Button>
+        }
+      />
+      <SheetContent className="z-[60] w-[min(620px,96vw)] border-l border-border sm:max-w-none">
+        <SheetHeader className="border-b border-border">
+          <SheetTitle>{messages.activity}</SheetTitle>
+        </SheetHeader>
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="space-y-4 p-4">
+            <SummaryStrip
+              activityCount={activities.length}
+              cards={cards}
+              doingCount={doingCount}
+              messages={messages}
+            />
+            <ActivityFeed
+              activities={activities}
+              locale={locale}
+              messages={messages}
+              timeZone={timeZone}
+            />
+          </div>
+        </ScrollArea>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+function SummaryStrip({
+  activityCount,
+  cards,
+  doingCount,
+  messages,
+}: {
   activityCount: number;
+  cards: DashboardCard[];
+  doingCount: number;
+  messages: DashboardMessages;
 }) {
   const doneCount = cards.filter((card) => card.status === "done").length;
 
   return (
     <div className="grid grid-cols-3 gap-2">
-      <MetricTile label="Cards" value={String(cards.length)} />
-      <MetricTile label="Doing" value={String(doingCount)} />
-      <MetricTile label="Done" value={`${doneCount}/${cards.length}`} />
+      <MetricTile label={messages.cards} value={String(cards.length)} />
+      <MetricTile label={messages.status.doing} value={String(doingCount)} />
+      <MetricTile label={messages.done} value={`${doneCount}/${cards.length}`} />
       <div className="col-span-3">
-        <MetricTile label="Activities" value={String(activityCount)} wide />
+        <MetricTile label={messages.activities} value={String(activityCount)} wide />
       </div>
     </div>
   );
@@ -856,17 +1185,47 @@ function MetricTile({
   );
 }
 
-function ActivityFeed({ activities }: { activities: DashboardActivity[] }) {
+function ActivityFeed({
+  activities,
+  locale,
+  messages,
+  timeZone,
+}: {
+  activities: DashboardActivity[];
+  locale: SupportedLocale;
+  messages: DashboardMessages;
+  timeZone: string;
+}) {
+  if (activities.length === 0) {
+    return <p className="text-sm text-muted-foreground">{messages.noActivity}</p>;
+  }
+
   return (
     <section className="space-y-2">
       {activities.map((activity) => (
-        <ActivityItem key={activity.id} activity={activity} />
+        <ActivityItem
+          key={activity.id}
+          activity={activity}
+          locale={locale}
+          messages={messages}
+          timeZone={timeZone}
+        />
       ))}
     </section>
   );
 }
 
-function ActivityItem({ activity }: { activity: DashboardActivity }) {
+function ActivityItem({
+  activity,
+  locale,
+  messages,
+  timeZone,
+}: {
+  activity: DashboardActivity;
+  locale: SupportedLocale;
+  messages: DashboardMessages;
+  timeZone: string;
+}) {
   const isFail = activity.phase === "fail" || activity.status === "failed";
   const isResult = activity.phase === "result";
 
@@ -882,36 +1241,29 @@ function ActivityItem({ activity }: { activity: DashboardActivity }) {
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <PhaseBadge phase={activity.phase} />
-            {activity.task && (
-              <span className="font-mono text-[10px] text-muted-foreground">
-                {activity.task}
-              </span>
-            )}
-          </div>
-          <h3 className="mt-2 text-sm font-medium">{activity.title}</h3>
+          <PhaseBadge messages={messages} phase={activity.phase} />
+          <h3 className="mt-2 text-sm font-medium">
+            {localizedText(activity, locale, "title", activity.title)}
+          </h3>
         </div>
         <span className="font-mono text-[10px] text-muted-foreground">
-          {formatKstTime(activity.createdAt)}
+          {formatTime(activity.createdAt, locale, timeZone)}
         </span>
       </div>
       <p className="mt-2 text-xs leading-5 text-muted-foreground">
-        {activity.message}
+        {localizedText(activity, locale, "message", activity.message)}
       </p>
-      <div className="mt-3 flex flex-wrap gap-1">
-        <Badge variant="outline" className="text-[10px]">
-          {activity.source}
-        </Badge>
-        <Badge variant="secondary" className="text-[10px]">
-          {activity.status}
-        </Badge>
-      </div>
     </article>
   );
 }
 
-function PhaseBadge({ phase }: { phase: string }) {
+function PhaseBadge({
+  messages,
+  phase,
+}: {
+  messages: DashboardMessages;
+  phase: string;
+}) {
   const icon =
     phase === "result" ? (
       <CheckCircle2 className="size-3" />
@@ -926,43 +1278,76 @@ function PhaseBadge({ phase }: { phase: string }) {
   return (
     <Badge variant={phase === "result" ? "default" : "secondary"}>
       {icon}
-      {phaseLabels[phase] ?? phase}
+      {messages.phase[phase as keyof typeof messages.phase] ?? phase}
     </Badge>
   );
 }
 
-function Inspector({ snapshot }: { snapshot: DashboardSnapshot }) {
+function InspectorSheet({
+  messages,
+  snapshot,
+}: {
+  messages: DashboardMessages;
+  snapshot: DashboardSnapshot;
+}) {
+  return (
+    <Sheet>
+      <SheetTrigger
+        render={
+          <Button type="button" variant="outline" size="sm">
+            <Settings2 className="size-4" />
+            {messages.inspector}
+          </Button>
+        }
+      />
+      <SheetContent className="z-[60] w-[min(780px,96vw)] border-l border-border sm:max-w-none">
+        <SheetHeader className="border-b border-border">
+          <SheetTitle>{messages.inspector}</SheetTitle>
+        </SheetHeader>
+        <Inspector messages={messages} snapshot={snapshot} />
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+function Inspector({
+  messages,
+  snapshot,
+}: {
+  messages: DashboardMessages;
+  snapshot: DashboardSnapshot;
+}) {
   return (
     <Tabs defaultValue="repo" className="flex min-h-0 flex-1 flex-col">
       <TabsList className="mx-4 mt-3 grid grid-cols-5">
-        <TabsTrigger value="repo" aria-label="Repo">
+        <TabsTrigger value="repo" aria-label={messages.repo}>
           <GitBranch className="size-4" />
         </TabsTrigger>
-        <TabsTrigger value="github" aria-label="GitHub">
+        <TabsTrigger value="github" aria-label={messages.github}>
           <GitPullRequest className="size-4" />
         </TabsTrigger>
-        <TabsTrigger value="design" aria-label="Design">
+        <TabsTrigger value="design" aria-label={messages.design}>
           <MoonStar className="size-4" />
         </TabsTrigger>
         <TabsTrigger value="harness" aria-label="Harness">
           <Settings2 className="size-4" />
         </TabsTrigger>
-        <TabsTrigger value="agents" aria-label="Agents">
+        <TabsTrigger value="agents" aria-label={messages.agents}>
           <Boxes className="size-4" />
         </TabsTrigger>
       </TabsList>
       <ScrollArea className="min-h-0 flex-1">
         <TabsContent value="repo" className="m-0 p-4">
-          <RepoPanel snapshot={snapshot} />
+          <RepoPanel messages={messages} snapshot={snapshot} />
         </TabsContent>
         <TabsContent value="github" className="m-0 p-4">
-          <GithubPanel snapshot={snapshot} />
+          <GithubPanel messages={messages} snapshot={snapshot} />
         </TabsContent>
         <TabsContent value="design" className="m-0 p-4">
           <DesignPanel snapshot={snapshot} />
         </TabsContent>
         <TabsContent value="harness" className="m-0 p-4">
-          <HarnessPanel snapshot={snapshot} />
+          <HarnessPanel messages={messages} snapshot={snapshot} />
         </TabsContent>
         <TabsContent value="agents" className="m-0 p-4">
           <SubagentPanel snapshot={snapshot} />
@@ -972,19 +1357,24 @@ function Inspector({ snapshot }: { snapshot: DashboardSnapshot }) {
   );
 }
 
-function RepoPanel({ snapshot }: { snapshot: DashboardSnapshot }) {
+function RepoPanel({
+  messages,
+  snapshot,
+}: {
+  messages: DashboardMessages;
+  snapshot: DashboardSnapshot;
+}) {
   return (
     <div className="space-y-4">
-      <MetricRow label="branch" value={snapshot.repoStatus.branch} />
+      <MetricRow label={messages.branch} value={snapshot.repoStatus.branch} />
       <MetricRow
-        label="changed"
+        label={messages.changed}
         value={String(snapshot.repoStatus.changedFiles.length)}
       />
       <Separator />
-      <div className="space-y-2">
-        <h3 className="text-sm font-semibold">Changed files</h3>
+      <div className="grid gap-1">
         {snapshot.repoStatus.changedFiles.length === 0 ? (
-          <p className="text-xs text-muted-foreground">변경 없음</p>
+          <p className="text-xs text-muted-foreground">{messages.empty}</p>
         ) : (
           snapshot.repoStatus.changedFiles.map((file) => (
             <div
@@ -998,36 +1388,39 @@ function RepoPanel({ snapshot }: { snapshot: DashboardSnapshot }) {
         )}
       </div>
       <Separator />
-      <div className="space-y-2">
-        <h3 className="text-sm font-semibold">Workspace</h3>
-        <div className="grid gap-1">
-          {snapshot.workspaceFiles.slice(0, 28).map((file) => (
-            <span
-              key={file}
-              className="truncate font-mono text-xs text-muted-foreground"
-            >
-              {file}
-            </span>
-          ))}
-        </div>
+      <div className="grid gap-1">
+        {snapshot.workspaceFiles.slice(0, 28).map((file) => (
+          <span
+            key={file}
+            className="truncate font-mono text-xs text-muted-foreground"
+          >
+            {file}
+          </span>
+        ))}
       </div>
     </div>
   );
 }
 
-function GithubPanel({ snapshot }: { snapshot: DashboardSnapshot }) {
+function GithubPanel({
+  messages,
+  snapshot,
+}: {
+  messages: DashboardMessages;
+  snapshot: DashboardSnapshot;
+}) {
   return (
     <div className="space-y-4">
       <MetricRow
-        label="auth"
+        label={messages.auth}
         value={snapshot.githubStatus.authenticated ? "ok" : "missing"}
       />
       <MetricRow
-        label="repo"
-        value={snapshot.githubStatus.repo.nameWithOwner ?? "not linked"}
+        label={messages.repo}
+        value={snapshot.githubStatus.repo.nameWithOwner ?? messages.linkedMissing}
       />
       <pre className="max-h-72 overflow-auto rounded-md border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
-        {snapshot.githubStatus.authText || "gh auth status 없음"}
+        {snapshot.githubStatus.authText || messages.empty}
       </pre>
     </div>
   );
@@ -1061,27 +1454,25 @@ function DesignPanel({ snapshot }: { snapshot: DashboardSnapshot }) {
   );
 }
 
-function HarnessPanel({ snapshot }: { snapshot: DashboardSnapshot }) {
+function HarnessPanel({
+  messages,
+  snapshot,
+}: {
+  messages: DashboardMessages;
+  snapshot: DashboardSnapshot;
+}) {
   return (
     <div className="space-y-4">
-      <div className="rounded-md border border-border bg-muted/10 p-3">
-          <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
-          <Code2 className="size-4 text-accent-cyan" />
-          Launch
-        </div>
-        <p className="break-all font-mono text-xs text-muted-foreground">
-          {snapshot.launch.command}
-        </p>
-      </div>
+      <MetricRow label={messages.launch} value={snapshot.launch.command} />
 
       <section className="space-y-2">
         <div className="flex items-center gap-2 text-sm font-semibold">
           <Sparkles className="size-4 text-accent-cyan" />
-          Repo Skills
+          {messages.skills}
         </div>
         {snapshot.harnessInventory.skills.length === 0 ? (
           <p className="rounded-md border border-border bg-muted/10 p-3 text-xs text-muted-foreground">
-            `.agents/skills` 안에 repo-local skill 없음
+            {messages.empty}
           </p>
         ) : (
           snapshot.harnessInventory.skills.map((skill) => (
@@ -1098,7 +1489,9 @@ function HarnessPanel({ snapshot }: { snapshot: DashboardSnapshot }) {
                 {skill.hasOpenAiYaml && (
                   <Badge variant="outline">openai.yaml</Badge>
                 )}
-                <Badge variant="outline">refs {skill.references}</Badge>
+                <Badge variant="outline">
+                  {messages.references} {skill.references}
+                </Badge>
               </div>
             </article>
           ))
@@ -1108,11 +1501,11 @@ function HarnessPanel({ snapshot }: { snapshot: DashboardSnapshot }) {
       <section className="space-y-2">
         <div className="flex items-center gap-2 text-sm font-semibold">
           <Settings2 className="size-4 text-accent-cyan" />
-          MCP Config
+          MCP
         </div>
         {snapshot.harnessInventory.mcpServers.length === 0 ? (
           <p className="rounded-md border border-border bg-muted/10 p-3 text-xs text-muted-foreground">
-            project-local MCP server 없음
+            {messages.empty}
           </p>
         ) : (
           snapshot.harnessInventory.mcpServers.map((server) => (
@@ -1122,11 +1515,11 @@ function HarnessPanel({ snapshot }: { snapshot: DashboardSnapshot }) {
             >
               <h3 className="truncate text-sm font-medium">{server.name}</h3>
               <p className="truncate font-mono text-xs text-muted-foreground">
-                {server.url || "url 없음"}
+                {server.url || messages.empty}
               </p>
               <div className="mt-3 flex flex-wrap gap-1">
                 <Badge variant={server.enabled ? "secondary" : "outline"}>
-                  {server.enabled ? "enabled" : "disabled"}
+                  {server.enabled ? messages.enabled : messages.disabled}
                 </Badge>
                 <Badge variant="outline">{server.source}</Badge>
                 <Badge variant="outline">{server.filePath}</Badge>
@@ -1134,26 +1527,6 @@ function HarnessPanel({ snapshot }: { snapshot: DashboardSnapshot }) {
             </article>
           ))
         )}
-      </section>
-
-      <section className="space-y-2">
-        <div className="flex items-center gap-2 text-sm font-semibold">
-          <Code2 className="size-4 text-accent-cyan" />
-          Harness Files
-        </div>
-        <div className="grid gap-2">
-          {snapshot.harnessInventory.configFiles.map((file) => (
-            <div
-              key={file.path}
-              className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/10 px-3 py-2"
-            >
-              <span className="truncate font-mono text-xs">{file.path}</span>
-              <Badge variant={file.exists ? "secondary" : "outline"}>
-                {file.exists ? "present" : "missing"}
-              </Badge>
-            </div>
-          ))}
-        </div>
       </section>
 
       {snapshot.harnessProfiles.map((profile) => (
@@ -1165,13 +1538,6 @@ function HarnessPanel({ snapshot }: { snapshot: DashboardSnapshot }) {
           <p className="mt-1 text-xs text-muted-foreground">
             {profile.description}
           </p>
-          <div className="mt-3 flex flex-wrap gap-1">
-            {profile.skills.map((skill) => (
-              <Badge key={skill} variant="secondary">
-                {skill}
-              </Badge>
-            ))}
-          </div>
         </article>
       ))}
     </div>
@@ -1213,5 +1579,20 @@ function MetricRow({ label, value }: { label: string; value: string }) {
       <span className="text-xs text-muted-foreground">{label}</span>
       <span className="truncate font-mono text-xs">{value}</span>
     </div>
+  );
+}
+
+function IconTip({
+  children,
+  label,
+}: {
+  children: React.ReactElement;
+  label: string;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger render={children} />
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   );
 }

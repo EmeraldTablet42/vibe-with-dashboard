@@ -10,6 +10,11 @@ export async function GET() {
     ok: true,
     appId: "vibe-with-dashboard",
     service: "vibe-with-dashboard",
+    mode:
+      process.env.VIBE_DASHBOARD_DEV === "1" ||
+      process.env.NODE_ENV === "development"
+        ? "development"
+        : "production",
     projectRoot: getProjectRoot(),
     appRoot: getAppRoot(),
     port: Number(process.env.DASHBOARD_PORT ?? process.env.PORT ?? 3000),

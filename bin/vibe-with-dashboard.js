@@ -99,7 +99,7 @@ function parseArgs(argv) {
     const next = argv[index + 1];
     const value = !next || next.startsWith("--") ? true : next;
     if (value !== true) index += 1;
-    if (key === "only" || key === "card") {
+    if (key === "only" || key === "card" || key === "card-json") {
       args[key] = [...(args[key] || []), value];
     } else {
       args[key] = value;
@@ -234,6 +234,7 @@ function installProjectRules(projectRoot, dryRun) {
     "Use `$vibe-with-dashboard` when project work should be reflected in the local monitoring dashboard.",
     "Before work, run `node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js ensure`.",
     "Record plan, implement, verify, result, and fail updates with the project-local Vibe with Dashboard CLI.",
+    "Include `translations` for Plan/Kanban titles and summaries when the user's locale is known.",
     "Keep dashboard entries concise and never store secrets, credentials, private reasoning, or long terminal logs.",
   ].join("\n");
   writeMarkerFile(path.join(projectRoot, "AGENTS.md"), body, dryRun);
@@ -333,8 +334,25 @@ function postJson(url, payload) {
 }
 
 function parseCard(value) {
-  const [title, summary = "", priority = "medium", status = "ready"] = String(value).split("::");
-  return { title, summary, priority, status };
+  const [
+    title,
+    summary = "",
+    priority = "medium",
+    status = "ready",
+    translationsJson = "",
+  ] = String(value).split("::");
+  return {
+    title,
+    summary,
+    priority,
+    status,
+    translations: translationsJson ? JSON.parse(translationsJson) : undefined,
+  };
+}
+
+function parseJsonFlag(value, fallback = undefined) {
+  if (!value) return fallback;
+  return JSON.parse(String(value));
 }
 
 async function main(argv = process.argv.slice(2)) {
@@ -397,8 +415,13 @@ async function main(argv = process.argv.slice(2)) {
       task,
       title: flags.title,
       summary: flags.summary,
+      translations: parseJsonFlag(flags.translations),
+      milestone: parseJsonFlag(flags.milestone),
       source: flags.source || "agent",
-      cards: flags.card?.map(parseCard),
+      cards: [
+        ...(flags.card?.map(parseCard) || []),
+        ...(flags["card-json"]?.map((value) => JSON.parse(String(value))) || []),
+      ],
     });
     log(`plan: ${task}`);
     return;

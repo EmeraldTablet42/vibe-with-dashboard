@@ -1,7 +1,0 @@
-# Project-local Codex settings for this repository.
-# The dashboard no longer requires an MCP sidecar.
-
-[agents]
-max_threads = 4
-max_depth = 1
-job_max_runtime_seconds = 1800

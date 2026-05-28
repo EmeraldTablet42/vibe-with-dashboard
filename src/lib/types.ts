@@ -11,6 +11,15 @@ export type ActivityPhase =
   | "fail";
 export type ActivityStatus = "active" | "done" | "failed";
 
+export type LocalizedText = {
+  title?: string;
+  summary?: string;
+  task?: string;
+  message?: string;
+  acceptanceCriteria?: string;
+};
+export type LocaleTranslations = Record<string, LocalizedText>;
+
 export type DashboardEventPayload = {
   kind:
     | "snapshot"

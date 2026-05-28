@@ -9,6 +9,15 @@ export const runtime = "nodejs";
 const goalPatchSchema = z.object({
   title: z.string().min(1).optional(),
   summary: z.string().min(1).optional(),
+  translations: z
+    .record(
+      z.string(),
+      z.object({
+        title: z.string().optional(),
+        summary: z.string().optional(),
+      })
+    )
+    .optional(),
   status: z.enum(["active", "paused", "complete"]).optional(),
   priority: z.enum(["high", "medium", "low"]).optional(),
   position: z.number().int().nonnegative().optional(),

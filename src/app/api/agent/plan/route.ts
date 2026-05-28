@@ -9,6 +9,17 @@ export const runtime = "nodejs";
 const cardSchema = z.object({
   title: z.string().min(1),
   summary: z.string().optional(),
+  translations: z
+    .record(
+      z.string(),
+      z.object({
+        title: z.string().optional(),
+        summary: z.string().optional(),
+        task: z.string().optional(),
+        acceptanceCriteria: z.string().optional(),
+      })
+    )
+    .optional(),
   priority: z.enum(["high", "medium", "low"]).optional(),
   status: z.enum(["backlog", "ready", "doing", "review", "done"]).optional(),
   size: z.string().optional(),
@@ -20,6 +31,31 @@ const planSchema = z.object({
   task: z.string().min(1),
   title: z.string().min(1).optional(),
   summary: z.string().optional(),
+  translations: z
+    .record(
+      z.string(),
+      z.object({
+        title: z.string().optional(),
+        summary: z.string().optional(),
+        task: z.string().optional(),
+      })
+    )
+    .optional(),
+  milestone: z
+    .object({
+      title: z.string().min(1).optional(),
+      summary: z.string().optional(),
+      translations: z
+        .record(
+          z.string(),
+          z.object({
+            title: z.string().optional(),
+            summary: z.string().optional(),
+          })
+        )
+        .optional(),
+    })
+    .optional(),
   source: z.string().min(1).default("agent"),
   cards: z.array(cardSchema).optional(),
 });

@@ -1,7 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const dbPath = path.resolve(process.cwd(), ".dashboard", "test.sqlite");
+const workerId =
+  process.env.VITEST_POOL_ID ?? process.env.VITEST_WORKER_ID ?? "0";
+const dbPath = path.resolve(
+  process.cwd(),
+  ".dashboard",
+  `test-${workerId}.sqlite`
+);
 process.env.DASHBOARD_DB_PATH = dbPath;
 
 for (const suffix of ["", "-wal", "-shm"]) {
@@ -10,4 +16,3 @@ for (const suffix of ["", "-wal", "-shm"]) {
     fs.unlinkSync(target);
   }
 }
-

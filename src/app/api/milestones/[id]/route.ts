@@ -9,6 +9,15 @@ export const runtime = "nodejs";
 const milestonePatchSchema = z.object({
   title: z.string().min(1).optional(),
   summary: z.string().min(1).optional(),
+  translations: z
+    .record(
+      z.string(),
+      z.object({
+        title: z.string().optional(),
+        summary: z.string().optional(),
+      })
+    )
+    .optional(),
   status: z.enum(["planned", "active", "complete"]).optional(),
   priority: z.enum(["high", "medium", "low"]).optional(),
   position: z.number().int().nonnegative().optional(),
