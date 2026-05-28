@@ -9,12 +9,12 @@ import { describe, expect, it, beforeEach } from "vitest";
 import {
   addActivity,
   addAgentCheckpoint,
-  archiveActiveBoard,
   getDashboardSnapshot,
   getSetting,
   markDuckSuggestionRead,
   replaceDuckSuggestions,
   updateCard,
+  updateCardsProgress,
   updateGoal,
   updateMilestone,
   upsertPlan,
@@ -106,6 +106,139 @@ describe("vibe dashboard state", () => {
     ).toBe(true);
   });
 
+  it("imports detailed multi-milestone plans and updates card progress from agent activity", async () => {
+    upsertPlan({
+      task: "Build a small calculator",
+      title: "Calculator smoke project",
+      summary: "Use a temporary calculator app to prove dashboard reactivity.",
+      replace: true,
+      milestones: [
+        {
+          title: "Scaffold",
+          summary: "Create temporary app files.",
+          cards: [
+            {
+              title: "Create calculator shell",
+              summary: "Add the minimal HTML, CSS, and JS structure.",
+              status: "ready",
+              priority: "high",
+              acceptanceCriteria: "Calculator shell renders with display and keypad.",
+            },
+          ],
+        },
+        {
+          title: "Verify",
+          summary: "Exercise arithmetic and cleanup.",
+          cards: [
+            {
+              title: "Run calculator checks",
+              summary: "Confirm simple operations and remove temporary files.",
+              status: "backlog",
+              priority: "medium",
+            },
+          ],
+        },
+      ],
+    });
+
+    let snapshot = await getDashboardSnapshot();
+    expect(snapshot.goals).toHaveLength(1);
+    expect(snapshot.goals[0].milestones).toHaveLength(2);
+    expect(snapshot.cards.map((card) => card.title)).toEqual([
+      "Create calculator shell",
+      "Run calculator checks",
+    ]);
+    expect(snapshot.cards[0].acceptanceCriteria).toContain("display");
+
+    const updates = updateCardsProgress([
+      { title: "Create calculator shell", status: "doing" },
+    ]);
+    expect(updates[0]).toMatchObject({ updated: true });
+
+    snapshot = await getDashboardSnapshot();
+    expect(
+      snapshot.cards.find((card) => card.title === "Create calculator shell")
+        ?.status
+    ).toBe("doing");
+    expect(snapshot.goals[0].milestones[0].status).toBe("active");
+  });
+
+  it("auto-archives when result activity and all cards are complete", async () => {
+    upsertPlan({
+      task: "Auto archive",
+      replace: true,
+      cards: [
+        { title: "One", status: "ready" },
+        { title: "Two", status: "ready" },
+      ],
+    });
+
+    updateCardsProgress([
+      { title: "One", status: "done" },
+      { title: "Two", status: "done" },
+    ]);
+    addActivity({
+      phase: "result",
+      title: "Done",
+      message: "All work finished",
+      task: "auto-archive",
+    });
+
+    const snapshot = await getDashboardSnapshot();
+    expect(snapshot.board.isEmpty).toBe(true);
+    expect(snapshot.cards).toHaveLength(0);
+    expect(snapshot.archives[0].title).toBe("Auto archive");
+    expect(snapshot.archives[0].snapshot.cards).toHaveLength(2);
+  });
+
+  it("does not let old result activity auto-archive a replacement plan", async () => {
+    upsertPlan({
+      task: "Old work",
+      replace: true,
+      cards: [{ title: "Old card", status: "ready" }],
+    });
+    const old = await getDashboardSnapshot();
+    updateCardsProgress([{ title: old.cards[0].title, status: "done" }]);
+    addActivity({
+      phase: "result",
+      title: "Old done",
+      message: "Old board archived",
+    });
+
+    upsertPlan({
+      task: "Replacement work",
+      replace: true,
+      cards: [{ title: "Replacement card", status: "ready" }],
+    });
+    updateCardsProgress([{ title: "Replacement card", status: "done" }]);
+
+    const snapshot = await getDashboardSnapshot();
+    expect(snapshot.board.title).toBe("Replacement work");
+    expect(snapshot.board.isEmpty).toBe(false);
+    expect(snapshot.cards).toHaveLength(1);
+    expect(snapshot.archives).toHaveLength(1);
+  });
+
+  it("archives when cards become done after result was already recorded", async () => {
+    upsertPlan({
+      task: "Late card completion",
+      replace: true,
+      cards: [{ title: "Finish after result", status: "ready" }],
+    });
+    addActivity({
+      phase: "result",
+      title: "Result first",
+      message: "The result was recorded before the card moved.",
+    });
+    expect((await getDashboardSnapshot()).board.isEmpty).toBe(false);
+
+    updateCardsProgress([{ title: "Finish after result", status: "done" }]);
+
+    const snapshot = await getDashboardSnapshot();
+    expect(snapshot.board.isEmpty).toBe(true);
+    expect(snapshot.archives[0].title).toBe("Late card completion");
+  });
+
   it("updates limited card, goal, and milestone fields", async () => {
     upsertPlan({ task: "Update board fields" });
     const initial = await getDashboardSnapshot();
@@ -192,9 +325,6 @@ describe("vibe dashboard state", () => {
       task: "duck",
     });
 
-    const result = archiveActiveBoard();
-    expect(result.archived).toBe(true);
-
     snapshot = await getDashboardSnapshot();
     expect(snapshot.duckSuggestions).toHaveLength(0);
     expect(snapshot.archives[0].snapshot.duckSuggestions).toHaveLength(1);
@@ -212,10 +342,6 @@ describe("vibe dashboard state", () => {
       message: "All cards complete",
       task: "archive",
     });
-
-    expect((await getDashboardSnapshot()).board.archiveReady).toBe(true);
-    const result = archiveActiveBoard();
-    expect(result.archived).toBe(true);
 
     const snapshot = await getDashboardSnapshot();
     expect(snapshot.board.isEmpty).toBe(true);
@@ -330,6 +456,81 @@ describe("installer CLI", () => {
           keyword: "Tests",
           title: "Add tests",
           actionPrompt: "Write tests.",
+        },
+      ],
+    });
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  });
+
+  it("posts card progress payloads through the CLI", async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibe-dashboard-card-"));
+    let payload = "";
+    const server = http.createServer((request, response) => {
+      request.on("data", (chunk) => {
+        payload += chunk;
+      });
+      request.on("end", () => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ ok: true }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("failed to start test server");
+    }
+
+    const result = await new Promise<{ status: number | null; stderr: string }>(
+      (resolve) => {
+        const child = spawn(
+          process.execPath,
+          [
+            "bin/vibe-with-dashboard.js",
+            "card",
+            "--project",
+            tempRoot,
+            "--card",
+            "Create calculator shell",
+            "--status",
+            "done",
+            "--priority",
+            "high",
+          ],
+          {
+            cwd: process.cwd(),
+            windowsHide: true,
+            env: {
+              ...process.env,
+              DASHBOARD_URL: `http://127.0.0.1:${address.port}`,
+            },
+          }
+        );
+        let stderr = "";
+        const timeout = setTimeout(() => {
+          child.kill();
+        }, 10_000);
+        child.stderr.on("data", (chunk) => {
+          stderr += String(chunk);
+        });
+        child.stdout.on("data", () => {
+          // drain output
+        });
+        child.on("close", (status) => {
+          clearTimeout(timeout);
+          resolve({ status, stderr });
+        });
+      }
+    );
+
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(payload)).toMatchObject({
+      updates: [
+        {
+          title: "Create calculator shell",
+          status: "done",
+          priority: "high",
         },
       ],
     });

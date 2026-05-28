@@ -20,10 +20,11 @@ The skill must:
 2. Reuse an existing healthy dashboard for this project.
 3. If the default port is occupied by another app, pick the next available port without killing that app.
 4. Open the dashboard URL in the user's default browser.
-5. Run `vibe-with-dashboard plan --task "<summary>"`, including agent-generated Plan/Kanban translations when the user's locale is known.
-6. Optionally run `vibe-with-dashboard suggest --suggestion-json '{...}'` with 3-5 agent-written Rubber Duck suggestions.
-7. Record phase-level activity while doing the requested work.
-8. Archive a completed board when all cards are done and result activity is recorded.
+5. Run `vibe-with-dashboard plan --plan-json '{...}'` for real agent plans so milestones/cards are not collapsed. Simple `--task` remains available for tiny work.
+6. Run `vibe-with-dashboard snapshot` before choosing the next work unit.
+7. Optionally run `vibe-with-dashboard suggest --suggestion-json '{...}'` with 3-5 agent-written Rubber Duck suggestions.
+8. Record phase-level activity and card status updates while doing the requested work.
+9. Completed boards archive automatically after all cards are `done` and `result` activity is recorded.
 
 ## Activity Phases
 
@@ -40,11 +41,13 @@ Never store private reasoning, secrets, credentials, or long terminal dumps in d
 
 ```powershell
 vibe-with-dashboard ensure
-vibe-with-dashboard plan --task "Implement onboarding"
+vibe-with-dashboard plan --plan-json '{"task":"Implement onboarding","title":"Implement onboarding","milestones":[{"title":"UI","cards":[{"title":"Create screen","summary":"Render the active board.","status":"ready","priority":"high"}]}]}'
 vibe-with-dashboard plan --task "Implement onboarding" --translations '{"ko":{"title":"온보딩 구현","task":"온보딩 구현"}}'
+vibe-with-dashboard snapshot
+vibe-with-dashboard card --card "Create screen" --status doing
 vibe-with-dashboard suggest --suggestion-json '{"keyword":"Tests","title":"Add coverage","actionPrompt":"Add tests for the current change."}'
-vibe-with-dashboard activity --phase implement --title "Implementation" --message "Core UI updated"
-vibe-with-dashboard archive
+vibe-with-dashboard activity --phase verify --title "Verification" --message "Core UI verified" --card "Create screen" --card-status done
+vibe-with-dashboard activity --phase result --title "Done" --message "All cards complete"
 npm run verify
 npm run build
 npm run e2e
@@ -61,6 +64,7 @@ vibe-with-dashboard suggest --suggestion-json '{"keyword":"Docs","title":"Tighte
 - Dashboard: `GET /api/dashboard/snapshot`
 - Health: `GET /api/health`
 - Agent plan: `POST /api/agent/plan`
+- Agent card progress: `POST /api/agent/cards`
 - Agent activity: `POST /api/agent/activity`
 - Agent suggestions: `POST /api/agent/suggestions`
 - Duck read state: `PATCH /api/duck-suggestions/:id`

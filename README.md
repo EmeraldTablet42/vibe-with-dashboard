@@ -59,19 +59,23 @@ The skill tells the agent to:
 1. Run the project-local dashboard CLI.
 2. Reuse or start the local dashboard.
 3. Open the dashboard in your default browser.
-4. Create/update the active plan board.
-5. Record `start`, `plan`, `implement`, `verify`, `result`, or `fail` activity.
-6. Provide Plan/Kanban item translations when the agent knows the user's target locale.
+4. Create/update the active plan board with full milestones and cards.
+5. Use the dashboard snapshot as the working milestone reference.
+6. Record `start`, `plan`, `implement`, `verify`, `result`, or `fail` activity.
+7. Move Work Cards to `doing`, `review`, or `done` as task units change state.
+8. Provide Plan/Kanban item translations when the agent knows the user's target locale.
 
 Manual commands:
 
 ```bash
 vibe-with-dashboard ensure
-vibe-with-dashboard plan --task "Implement onboarding"
+vibe-with-dashboard plan --plan-json '{"task":"Implement onboarding","title":"Implement onboarding","milestones":[{"title":"UI","cards":[{"title":"Create screen","summary":"Render the active board.","status":"ready","priority":"high"}]}]}'
 vibe-with-dashboard plan --task "Implement onboarding" --translations '{"ko":{"title":"온보딩 구현","task":"온보딩 구현"}}'
+vibe-with-dashboard snapshot
+vibe-with-dashboard card --card "Create screen" --status doing
 vibe-with-dashboard suggest --suggestion-json '{"keyword":"Tests","title":"Add coverage","actionPrompt":"Add tests for the current change."}'
-vibe-with-dashboard activity --phase implement --message "Core UI updated"
-vibe-with-dashboard archive
+vibe-with-dashboard activity --phase verify --message "Core UI verified" --card "Create screen" --card-status done
+vibe-with-dashboard activity --phase result --message "All cards complete"
 ```
 
 Rubber Duck suggestion-json example:
@@ -84,9 +88,9 @@ Project-local fallback, always available after the one-line install:
 
 ```bash
 node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js ensure
-node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js plan --task "Implement onboarding"
-node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js activity --phase implement --message "Core UI updated"
-node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js archive
+node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js plan --plan-json "{\"task\":\"Implement onboarding\",\"title\":\"Implement onboarding\",\"milestones\":[{\"title\":\"UI\",\"cards\":[{\"title\":\"Create screen\",\"status\":\"ready\",\"priority\":\"high\"}]}]}"
+node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js card --card "Create screen" --status doing
+node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js activity --phase result --message "All cards complete" --card "Create screen" --card-status done
 ```
 
 ## What You Get
@@ -94,12 +98,12 @@ node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js archive
 | Area | What it shows |
 | --- | --- |
 | Plan sidebar | Goal, milestones, cards. Collapsible and resizable. Reopens at default width. |
-| Kanban | Vertical workflow rows and priority columns. |
+| Kanban | Vertical workflow rows and priority columns. Drag cards or let agents update cards. |
 | Current state | Active phase, focus card, and progress rail. |
 | Activity sheet | Agent activity timeline, hidden until toggled. |
 | Inspector | Repo, GitHub, design tokens, harness files, skills, MCP, subagents. |
 | Rubber Duck | Floating generated duck icon with unread suggestion badge, keyword chips, and copyable action prompts. |
-| Archive | Finished boards are stored, then the active board clears. |
+| Archive | Finished boards are stored automatically after every card is done and result activity is recorded. |
 | Locale | English by default, Korean supported, unsupported locales fall back to English. Agent-supplied Plan/Kanban translations are shown when available. |
 
 ## Agent Support

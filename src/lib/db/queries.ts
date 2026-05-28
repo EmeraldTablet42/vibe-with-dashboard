@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 
 import { getDb, getSqlite, initializeDatabase } from "@/lib/db/client";
 import { ensureSeedData } from "@/lib/db/seed";
@@ -52,10 +52,180 @@ const priorityRank: Record<DuckSuggestionPriority, number> = {
   low: 2,
 };
 
+type PlanCardInput = {
+  title: string;
+  summary?: string;
+  translations?: LocaleTranslations;
+  priority?: CardPriority;
+  status?: CardStatus;
+  owner?: string;
+  size?: string;
+  acceptanceCriteria?: string;
+  verificationCommand?: string;
+  dependsOn?: string[];
+  position?: number;
+};
+
+type PlanMilestoneInput = {
+  title?: string;
+  summary?: string;
+  translations?: LocaleTranslations;
+  status?: MilestoneStatus;
+  priority?: CardPriority;
+  position?: number;
+  cards?: PlanCardInput[];
+};
+
+type PlanGoalInput = {
+  title?: string;
+  summary?: string;
+  translations?: LocaleTranslations;
+  status?: GoalStatus;
+  priority?: CardPriority;
+  position?: number;
+  milestones?: PlanMilestoneInput[];
+};
+
+type PlanInput = {
+  task: string;
+  title?: string;
+  summary?: string;
+  source?: string;
+  translations?: LocaleTranslations;
+  replace?: boolean;
+  milestone?: PlanMilestoneInput;
+  milestones?: PlanMilestoneInput[];
+  goals?: PlanGoalInput[];
+  cards?: PlanCardInput[];
+};
+
+type CardProgressInput = {
+  id?: string;
+  title?: string;
+  summary?: string;
+  translations?: LocaleTranslations;
+  status?: CardStatus;
+  priority?: CardPriority;
+  owner?: string;
+  size?: string;
+  acceptanceCriteria?: string;
+  verificationCommand?: string;
+  dependsOn?: string[];
+  position?: number;
+};
+
 function compactPatch<T extends Record<string, unknown>>(input: T) {
   return Object.fromEntries(
     Object.entries(input).filter(([, value]) => value !== undefined)
   ) as Partial<T>;
+}
+
+function normalized(value = "") {
+  return value.trim().toLowerCase();
+}
+
+function shouldReplacePlan(input: PlanInput) {
+  if (input.replace !== undefined) return input.replace;
+  return Boolean(input.goals?.length || input.milestones?.length);
+}
+
+function normalizePlan(input: PlanInput, fallbackSummary: string): PlanGoalInput[] {
+  if (input.goals?.length) {
+    return input.goals.map((goal, goalIndex) => ({
+      ...goal,
+      title: goal.title?.trim() || input.title?.trim() || input.task.trim(),
+      summary: goal.summary?.trim() || input.summary?.trim() || fallbackSummary,
+      translations: goal.translations ?? input.translations,
+      position: goal.position ?? goalIndex + 1,
+      milestones: goal.milestones?.length
+        ? goal.milestones
+        : [
+            {
+              ...(input.milestone ?? {}),
+              cards: input.cards,
+            },
+          ],
+    }));
+  }
+
+  const milestonesToUse =
+    input.milestones?.length
+      ? input.milestones
+      : [
+          {
+            ...(input.milestone ?? {}),
+            cards: input.cards,
+          },
+        ];
+
+  return [
+    {
+      title: input.title?.trim() || input.task.trim(),
+      summary: input.summary?.trim() || fallbackSummary,
+      translations: input.translations,
+      status: "active",
+      priority: "high",
+      position: 1,
+      milestones: milestonesToUse,
+    },
+  ];
+}
+
+function deriveMilestoneStatus(cardRows: Array<{ status: string }>): MilestoneStatus {
+  if (cardRows.length === 0) return "planned";
+  if (cardRows.every((card) => card.status === "done")) return "complete";
+  if (cardRows.some((card) => card.status === "doing" || card.status === "review")) {
+    return "active";
+  }
+  if (cardRows.some((card) => card.status === "ready")) return "active";
+  return "planned";
+}
+
+function deriveGoalStatus(milestoneRows: Array<{ status: string }>): GoalStatus {
+  if (milestoneRows.length === 0) return "active";
+  if (milestoneRows.every((milestone) => milestone.status === "complete")) {
+    return "complete";
+  }
+  return "active";
+}
+
+function syncParentStatuses(boardId: string) {
+  const db = getDb();
+  const milestoneRows = db
+    .select()
+    .from(milestones)
+    .where(eq(milestones.boardId, boardId))
+    .all();
+  const cardRows = db.select().from(cards).where(eq(cards.boardId, boardId)).all();
+
+  for (const milestone of milestoneRows) {
+    const nextStatus = deriveMilestoneStatus(
+      cardRows.filter((card) => card.milestoneId === milestone.id)
+    );
+    if (nextStatus !== milestone.status) {
+      db.update(milestones)
+        .set({ status: nextStatus, updatedAt: now() })
+        .where(eq(milestones.id, milestone.id))
+        .run();
+    }
+  }
+
+  const refreshedMilestones = db
+    .select()
+    .from(milestones)
+    .where(eq(milestones.boardId, boardId))
+    .all();
+  for (const goal of db.select().from(goals).where(eq(goals.boardId, boardId)).all()) {
+    const nextStatus = deriveGoalStatus(
+      refreshedMilestones.filter((milestone) => milestone.goalId === goal.id)
+    );
+    if (nextStatus !== goal.status) {
+      db.update(goals)
+        .set({ status: nextStatus, updatedAt: now() })
+        .where(eq(goals.id, goal.id))
+        .run();
+    }
+  }
 }
 
 function getSettingsMap() {
@@ -302,34 +472,15 @@ export async function getDashboardSnapshot() {
   };
 }
 
-export function upsertPlan(input: {
-  task: string;
-  title?: string;
-  summary?: string;
-  source?: string;
-  translations?: LocaleTranslations;
-  milestone?: {
-    title?: string;
-    summary?: string;
-    translations?: LocaleTranslations;
-  };
-  cards?: Array<{
-    title: string;
-    summary?: string;
-    translations?: LocaleTranslations;
-    priority?: CardPriority;
-    status?: CardStatus;
-    size?: string;
-    acceptanceCriteria?: string;
-    verificationCommand?: string;
-  }>;
-}) {
+export function upsertPlan(input: PlanInput) {
   const board = getActiveBoardRow();
   const title = input.title?.trim() || input.task.trim() || "Untitled task";
   const summary =
     input.summary?.trim() ||
     "The active board tracks LLM agent progress across Plan and Kanban.";
   const db = getDb();
+  const replacePlan = shouldReplacePlan(input);
+  const normalizedGoals = normalizePlan(input, summary);
 
   db.update(boards)
     .set(compactPatch({
@@ -343,6 +494,126 @@ export function upsertPlan(input: {
     }))
     .where(eq(boards.id, board.id))
     .run();
+
+  if (replacePlan) {
+    db.delete(activityEntries).where(eq(activityEntries.boardId, board.id)).run();
+    db.delete(agentCheckpoints).where(eq(agentCheckpoints.boardId, board.id)).run();
+    db.delete(duckSuggestions).where(eq(duckSuggestions.boardId, board.id)).run();
+    db.delete(cards).where(eq(cards.boardId, board.id)).run();
+    db.delete(milestones).where(eq(milestones.boardId, board.id)).run();
+    db.delete(goals).where(eq(goals.boardId, board.id)).run();
+
+    for (const [goalIndex, requestedGoal] of normalizedGoals.entries()) {
+      const goalId = randomUUID();
+      const goalTitle = requestedGoal.title?.trim() || title;
+      const goalSummary = requestedGoal.summary?.trim() || summary;
+      db.insert(goals)
+        .values({
+          id: goalId,
+          boardId: board.id,
+          title: goalTitle,
+          summary: goalSummary,
+          translationsJson: stringifyTranslations(
+            requestedGoal.translations ?? input.translations
+          ),
+          status: requestedGoal.status ?? "active",
+          priority: requestedGoal.priority ?? "high",
+          position: requestedGoal.position ?? goalIndex + 1,
+          createdAt: now(),
+          updatedAt: now(),
+        })
+        .run();
+
+      const requestedMilestones = requestedGoal.milestones?.length
+        ? requestedGoal.milestones
+        : [
+            {
+              title: input.milestone?.title,
+              summary: input.milestone?.summary,
+              translations: input.milestone?.translations,
+              cards: input.cards,
+            },
+          ];
+
+      for (const [milestoneIndex, requestedMilestone] of requestedMilestones.entries()) {
+        const milestoneId = randomUUID();
+        const milestoneTitle =
+          requestedMilestone.title?.trim() ||
+          (requestedMilestones.length === 1 ? "Current work" : `Milestone ${milestoneIndex + 1}`);
+        const milestoneSummary = requestedMilestone.summary?.trim() || goalSummary;
+        db.insert(milestones)
+          .values({
+            id: milestoneId,
+            boardId: board.id,
+            goalId,
+            title: milestoneTitle,
+            summary: milestoneSummary,
+            translationsJson: stringifyTranslations(requestedMilestone.translations),
+            status: requestedMilestone.status ?? "active",
+            priority: requestedMilestone.priority ?? "high",
+            position: requestedMilestone.position ?? milestoneIndex + 1,
+            createdAt: now(),
+            updatedAt: now(),
+          })
+          .run();
+
+        const requestedCards = requestedMilestone.cards ?? [];
+        for (const [cardIndex, card] of requestedCards.entries()) {
+          db.insert(cards)
+            .values({
+              id: randomUUID(),
+              boardId: board.id,
+              milestoneId,
+              title: card.title,
+              summary: card.summary || milestoneSummary,
+              translationsJson: stringifyTranslations(card.translations),
+              status: card.status ?? "ready",
+              priority: card.priority ?? "medium",
+              owner: card.owner ?? "agent",
+              size: card.size ?? "M",
+              acceptanceCriteria: card.acceptanceCriteria ?? "",
+              verificationCommand: card.verificationCommand ?? "",
+              dependsOnJson: JSON.stringify(card.dependsOn ?? []),
+              position: card.position ?? cardIndex + 1,
+              createdAt: now(),
+              updatedAt: now(),
+            })
+            .run();
+        }
+      }
+    }
+
+    syncParentStatuses(board.id);
+    addActivity({
+      phase: "plan",
+      source: input.source ?? "agent",
+      status: "done",
+      task: input.task,
+      title: "Plan updated",
+      message: title,
+      metadata: {
+        goals: normalizedGoals.length,
+        milestones: normalizedGoals.reduce(
+          (count, goal) => count + (goal.milestones?.length ?? 0),
+          0
+        ),
+        cards: normalizedGoals.reduce(
+          (count, goal) =>
+            count +
+            (goal.milestones ?? []).reduce(
+              (cardCount, milestone) => cardCount + (milestone.cards?.length ?? 0),
+              0
+            ),
+          0
+        ),
+        replace: true,
+      },
+      translations: input.translations,
+    });
+
+    publishDashboardEvent({ kind: "snapshot", id: board.id, message: "plan" });
+    return { boardId: board.id };
+  }
 
   let goal = db
     .select()
@@ -451,7 +722,35 @@ export function upsertPlan(input: {
         ];
 
   for (const [index, card] of requestedCards.entries()) {
-    if (existingCards.some((item) => item.title === card.title)) continue;
+    const existingCard = existingCards.find(
+      (item) => normalized(item.title) === normalized(card.title)
+    );
+
+    if (existingCard) {
+      db.update(cards)
+        .set(
+          compactPatch({
+            summary: card.summary,
+            translationsJson: card.translations
+              ? stringifyTranslations(card.translations)
+              : undefined,
+            status: card.status,
+            priority: card.priority,
+            owner: card.owner,
+            size: card.size,
+            acceptanceCriteria: card.acceptanceCriteria,
+            verificationCommand: card.verificationCommand,
+            dependsOnJson: card.dependsOn
+              ? JSON.stringify(card.dependsOn)
+              : undefined,
+            position: card.position,
+            updatedAt: now(),
+          })
+        )
+        .where(eq(cards.id, existingCard.id))
+        .run();
+      continue;
+    }
 
     db.insert(cards)
       .values({
@@ -463,11 +762,12 @@ export function upsertPlan(input: {
         translationsJson: stringifyTranslations(card.translations),
         status: card.status ?? "ready",
         priority: card.priority ?? "medium",
+        owner: card.owner ?? "agent",
         size: card.size ?? "M",
         acceptanceCriteria: card.acceptanceCriteria ?? "",
         verificationCommand: card.verificationCommand ?? "",
-        dependsOnJson: JSON.stringify([]),
-        position: existingCards.length + index + 1,
+        dependsOnJson: JSON.stringify(card.dependsOn ?? []),
+        position: card.position ?? existingCards.length + index + 1,
         createdAt: now(),
         updatedAt: now(),
       })
@@ -485,6 +785,7 @@ export function upsertPlan(input: {
     translations: input.translations,
   });
 
+  syncParentStatuses(board.id);
   publishDashboardEvent({ kind: "snapshot", id: board.id, message: "plan" });
   return { boardId: board.id };
 }
@@ -554,6 +855,68 @@ export function markDuckSuggestionRead(id: string) {
     .run();
   publishDashboardEvent({ kind: "duck-suggestion", id, message: "read" });
   return { id, readAt };
+}
+
+export function updateCardProgress(input: CardProgressInput) {
+  const board = getActiveBoardRow();
+  const db = getDb();
+  const card = input.id
+    ? db
+        .select()
+        .from(cards)
+        .where(and(eq(cards.boardId, board.id), eq(cards.id, input.id)))
+        .get()
+    : input.title
+      ? db
+          .select()
+          .from(cards)
+          .where(eq(cards.boardId, board.id))
+          .orderBy(asc(cards.position))
+          .all()
+          .find((item) => normalized(item.title) === normalized(input.title))
+      : undefined;
+
+  if (!card) {
+    return {
+      updated: false,
+      reason: "card-not-found",
+      title: input.title,
+      id: input.id,
+    };
+  }
+
+  const patch = compactPatch({
+    title: input.title?.trim(),
+    summary: input.summary?.trim(),
+    translationsJson: input.translations
+      ? stringifyTranslations(input.translations)
+      : undefined,
+    status: input.status,
+    priority: input.priority,
+    owner: input.owner,
+    size: input.size,
+    acceptanceCriteria: input.acceptanceCriteria,
+    verificationCommand: input.verificationCommand,
+    dependsOnJson: input.dependsOn ? JSON.stringify(input.dependsOn) : undefined,
+    position: input.position,
+    updatedAt: now(),
+  });
+
+  db.update(cards).set(patch).where(eq(cards.id, card.id)).run();
+  syncParentStatuses(board.id);
+  publishDashboardEvent({ kind: "card", id: card.id, message: "progress" });
+  const archive = archiveActiveBoard();
+
+  return {
+    updated: true,
+    cardId: card.id,
+    title: input.title ?? card.title,
+    archive,
+  };
+}
+
+export function updateCardsProgress(updates: CardProgressInput[]) {
+  return updates.map((update) => updateCardProgress(update));
 }
 
 export function archiveActiveBoard() {
@@ -692,7 +1055,11 @@ export function addActivity(input: {
     .run();
 
   publishDashboardEvent({ kind: "activity", id, message: input.title });
-  return getActivityById(id);
+  const activity = getActivityById(id);
+  if (input.phase === "result") {
+    archiveActiveBoard();
+  }
+  return activity;
 }
 
 export function getActivityById(id: string) {
@@ -770,7 +1137,9 @@ export function updateCard(
       metadata: input,
     });
   }
+  syncParentStatuses(card?.boardId ?? "");
   publishDashboardEvent({ kind: "card", id: cardId, message: "updated" });
+  archiveActiveBoard();
 }
 
 export function updateGoal(

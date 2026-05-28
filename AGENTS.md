@@ -14,10 +14,12 @@ Local, single-user monitoring dashboard for LLM agent work.
 - Before monitored work, run `vibe-with-dashboard ensure`; do not ask the user to start the server manually.
 - Keep the web app monitoring-only: no prompt input or agent command queue.
 - Record phase-level activity with `vibe-with-dashboard activity`.
-- Use `vibe-with-dashboard plan --task "..."` to populate the active Plan/Kanban board.
+- Use `vibe-with-dashboard plan --plan-json "{...}"` for real work plans so milestones/cards are preserved. Use `--task` only for tiny work.
+- Use `vibe-with-dashboard snapshot` before choosing the next Work Card.
+- Use `vibe-with-dashboard card --card "..." --status doing|review|done` or activity card flags to keep Kanban current.
 - Include agent-generated `translations` for Plan/Kanban titles and summaries when the user's locale is known.
 - Use `vibe-with-dashboard suggest --suggestion-json "{...}"` to populate Rubber Duck suggestions for the active board.
-- Use `vibe-with-dashboard archive` after all cards are done and result activity is recorded.
+- Boards archive automatically after all cards are done and result activity is recorded. Use `vibe-with-dashboard archive` only as a manual retry.
 - Do not store private reasoning, credentials, secrets, or long terminal dumps in activity entries.
 - Bind local services to `127.0.0.1`.
 - Do not edit global agent settings unless the user explicitly requests `--global`.
@@ -28,6 +30,8 @@ Local, single-user monitoring dashboard for LLM agent work.
 - `npm run dashboard`: start the dashboard launcher.
 - `npm run dashboard:activity -- --phase verify --message "..."`
 - `npm run dashboard:plan -- --task "..."`
+- `npm run dashboard:snapshot`
+- `npm run dashboard:card -- --card "..." --status done`
 - `npm run dashboard:archive`
 - `npm run verify`: lint, typecheck, and unit tests.
 - `npm run build`: Next production build.

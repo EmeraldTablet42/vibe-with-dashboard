@@ -22,9 +22,49 @@ const cardSchema = z.object({
     .optional(),
   priority: z.enum(["high", "medium", "low"]).optional(),
   status: z.enum(["backlog", "ready", "doing", "review", "done"]).optional(),
+  owner: z.string().optional(),
   size: z.string().optional(),
   acceptanceCriteria: z.string().optional(),
   verificationCommand: z.string().optional(),
+  dependsOn: z.array(z.string()).optional(),
+  position: z.number().int().optional(),
+});
+
+const milestoneSchema = z.object({
+  title: z.string().min(1).optional(),
+  summary: z.string().optional(),
+  translations: z
+    .record(
+      z.string(),
+      z.object({
+        title: z.string().optional(),
+        summary: z.string().optional(),
+      })
+    )
+    .optional(),
+  status: z.enum(["planned", "active", "complete"]).optional(),
+  priority: z.enum(["high", "medium", "low"]).optional(),
+  position: z.number().int().optional(),
+  cards: z.array(cardSchema).optional(),
+});
+
+const goalSchema = z.object({
+  title: z.string().min(1).optional(),
+  summary: z.string().optional(),
+  translations: z
+    .record(
+      z.string(),
+      z.object({
+        title: z.string().optional(),
+        summary: z.string().optional(),
+        task: z.string().optional(),
+      })
+    )
+    .optional(),
+  status: z.enum(["active", "paused", "complete"]).optional(),
+  priority: z.enum(["high", "medium", "low"]).optional(),
+  position: z.number().int().optional(),
+  milestones: z.array(milestoneSchema).optional(),
 });
 
 const planSchema = z.object({
@@ -54,8 +94,14 @@ const planSchema = z.object({
           })
         )
         .optional(),
+      status: z.enum(["planned", "active", "complete"]).optional(),
+      priority: z.enum(["high", "medium", "low"]).optional(),
+      position: z.number().int().optional(),
     })
     .optional(),
+  milestones: z.array(milestoneSchema).optional(),
+  goals: z.array(goalSchema).optional(),
+  replace: z.boolean().optional(),
   source: z.string().min(1).default("agent"),
   cards: z.array(cardSchema).optional(),
 });

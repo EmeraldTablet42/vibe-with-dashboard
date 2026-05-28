@@ -73,8 +73,10 @@ const COMMANDS = new Set([
   "ensure",
   "activity",
   "plan",
+  "card",
   "suggest",
   "archive",
+  "snapshot",
   "list",
 ]);
 
@@ -111,6 +113,8 @@ function parseArgs(argv) {
       key === "only" ||
       key === "card" ||
       key === "card-json" ||
+      key === "card-update" ||
+      key === "milestone-json" ||
       key === "suggestion-json"
     ) {
       args[key] = [...(args[key] || []), value];
@@ -246,7 +250,10 @@ function installProjectRules(projectRoot, dryRun) {
     "",
     "Use `$vibe-with-dashboard` when project work should be reflected in the local monitoring dashboard.",
     "Before work, run `node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js ensure`.",
+    "Use detailed `plan --plan-json` for real work plans, then `snapshot` before choosing the next Work Card.",
     "Record plan, implement, verify, result, and fail updates with the project-local Vibe with Dashboard CLI.",
+    "Move cards with `card --card \"...\" --status doing|review|done` or activity card flags as work units change state.",
+    "Completed boards archive automatically after all cards are done and result activity is recorded.",
     "Include `translations` for Plan/Kanban titles and summaries when the user's locale is known.",
     "Use `suggest --suggestion-json` for Rubber Duck suggestions when project advice should be visible.",
     "Keep dashboard entries concise and never store secrets, credentials, private reasoning, or long terminal logs.",
@@ -311,8 +318,8 @@ function readDashboardUrl(projectRoot) {
   return "http://127.0.0.1:3000";
 }
 
-function postJson(url, payload) {
-  const body = JSON.stringify(payload);
+function requestJson(url, payload, method = "POST") {
+  const body = payload === undefined ? undefined : JSON.stringify(payload);
   const target = new URL(url);
   return new Promise((resolve, reject) => {
     const request = http.request(
@@ -320,10 +327,10 @@ function postJson(url, payload) {
         hostname: target.hostname,
         port: target.port,
         path: target.pathname,
-        method: "POST",
+        method,
         headers: {
           "Content-Type": "application/json",
-          "Content-Length": Buffer.byteLength(body),
+          ...(body ? { "Content-Length": Buffer.byteLength(body) } : {}),
         },
       },
       (response) => {
@@ -342,9 +349,17 @@ function postJson(url, payload) {
       }
     );
     request.on("error", reject);
-    request.write(body);
+    if (body) request.write(body);
     request.end();
   });
+}
+
+function postJson(url, payload) {
+  return requestJson(url, payload, "POST");
+}
+
+function getJson(url) {
+  return requestJson(url, undefined, "GET");
 }
 
 function parseCard(value) {
@@ -367,6 +382,73 @@ function parseCard(value) {
 function parseJsonFlag(value, fallback = undefined) {
   if (!value) return fallback;
   return JSON.parse(String(value));
+}
+
+function firstValue(value) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function parsePlanFlags(flags) {
+  const planJson = parseJsonFlag(flags["plan-json"]);
+  if (planJson) return planJson;
+  return {
+    task: String(flags.task || flags._[0] || "").trim(),
+    title: flags.title,
+    summary: flags.summary,
+    translations: parseJsonFlag(flags.translations),
+    milestone: parseJsonFlag(flags.milestone),
+    milestones: flags["milestone-json"]?.map((value) => JSON.parse(String(value))),
+    replace: flags.replace ? true : undefined,
+    source: flags.source || "agent",
+    cards: [
+      ...(flags.card?.map(parseCard) || []),
+      ...(flags["card-json"]?.map((value) => JSON.parse(String(value))) || []),
+    ],
+  };
+}
+
+function parseCardUpdateFlags(flags) {
+  const updates = [
+    ...(flags["card-update"]?.map((value) => JSON.parse(String(value))) || []),
+  ];
+
+  if (flags.card || flags["card-title"] || flags["card-id"] || flags.status) {
+    updates.push({
+      id: flags["card-id"],
+      title: flags["card-title"] || firstValue(flags.card),
+      status: flags.status || flags["card-status"],
+      priority: flags.priority || flags["card-priority"],
+      summary: flags.summary,
+      owner: flags.owner,
+      size: flags.size,
+      acceptanceCriteria: flags["acceptance-criteria"],
+      verificationCommand: flags["verification-command"],
+      dependsOn: parseJsonFlag(flags["depends-on"]),
+      translations: parseJsonFlag(flags.translations),
+    });
+  }
+
+  return updates.filter((update) => update.id || update.title);
+}
+
+function summarizeSnapshot(raw) {
+  const snapshot = JSON.parse(raw);
+  const lines = [
+    `${snapshot.board.title || "No active plan"} (${snapshot.board.status})`,
+    `Task: ${snapshot.board.task || "-"}`,
+  ];
+  for (const goal of snapshot.goals || []) {
+    lines.push(`Goal: ${goal.title} [${goal.status}]`);
+    for (const milestone of goal.milestones || []) {
+      lines.push(`  Milestone: ${milestone.title} [${milestone.status}]`);
+      for (const card of milestone.cards || []) {
+        lines.push(
+          `    - ${card.title} [${card.status}/${card.priority}] ${card.summary || ""}`.trimEnd()
+        );
+      }
+    }
+  }
+  return lines.join("\n");
 }
 
 async function main(argv = process.argv.slice(2)) {
@@ -407,8 +489,15 @@ async function main(argv = process.argv.slice(2)) {
 
   const baseUrl = readDashboardUrl(projectRoot);
 
+  if (command === "snapshot") {
+    const response = await getJson(`${baseUrl}/api/dashboard/snapshot`);
+    process.stdout.write(flags.json ? response : `${summarizeSnapshot(response)}\n`);
+    return;
+  }
+
   if (command === "activity") {
     const phase = String(flags.phase || "implement");
+    const cardUpdates = parseCardUpdateFlags(flags);
     await postJson(`${baseUrl}/api/agent/activity`, {
       phase,
       source: flags.source || "agent",
@@ -417,27 +506,27 @@ async function main(argv = process.argv.slice(2)) {
       title: flags.title || phase,
       message: flags.message || flags.title || "Activity recorded",
       metadata: flags.metadata ? JSON.parse(String(flags.metadata)) : {},
+      cards: cardUpdates.length > 0 ? cardUpdates : undefined,
     });
     log(`${phase}: ${flags.message || flags.title || "Activity recorded"}`);
     return;
   }
 
   if (command === "plan") {
-    const task = String(flags.task || flags._[0] || "").trim();
-    if (!task) throw new Error("plan requires --task");
-    await postJson(`${baseUrl}/api/agent/plan`, {
-      task,
-      title: flags.title,
-      summary: flags.summary,
-      translations: parseJsonFlag(flags.translations),
-      milestone: parseJsonFlag(flags.milestone),
-      source: flags.source || "agent",
-      cards: [
-        ...(flags.card?.map(parseCard) || []),
-        ...(flags["card-json"]?.map((value) => JSON.parse(String(value))) || []),
-      ],
-    });
-    log(`plan: ${task}`);
+    const payload = parsePlanFlags(flags);
+    if (!payload.task) throw new Error("plan requires --task or --plan-json with task");
+    await postJson(`${baseUrl}/api/agent/plan`, payload);
+    log(`plan: ${payload.task}`);
+    return;
+  }
+
+  if (command === "card") {
+    const updates = parseCardUpdateFlags(flags);
+    if (updates.length === 0) {
+      throw new Error("card requires --card, --card-title, --card-id, or --card-update");
+    }
+    await postJson(`${baseUrl}/api/agent/cards`, { updates });
+    log(`card updates: ${updates.length}`);
     return;
   }
 

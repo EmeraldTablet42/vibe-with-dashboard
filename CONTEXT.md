@@ -4,6 +4,14 @@
 
 The editable board for the current task. It contains the live Plan, Kanban cards, and current work state.
 
+## Dashboard Contract
+
+The shared agreement between an LLM agent and the dashboard: the agent writes the working plan, keeps cards current as work units move, records phase-level activity, and lets completed boards become Archives.
+
+## Work Card
+
+A trackable unit of agent work. Work Cards appear in both Plan and Kanban, carry status and priority, and should be updated when the corresponding work starts, waits for review, or finishes.
+
 ## Archive
 
 A read-only snapshot of a completed board. Archived boards preserve Plan, Kanban, and Activity records without allowing edits.

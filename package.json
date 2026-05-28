@@ -20,6 +20,8 @@
     "dashboard:ensure": "node bin/vibe-with-dashboard.js ensure",
     "dashboard:activity": "node bin/vibe-with-dashboard.js activity",
     "dashboard:plan": "node bin/vibe-with-dashboard.js plan",
+    "dashboard:card": "node bin/vibe-with-dashboard.js card",
+    "dashboard:snapshot": "node bin/vibe-with-dashboard.js snapshot",
     "dashboard:suggest": "node bin/vibe-with-dashboard.js suggest",
     "dashboard:archive": "node bin/vibe-with-dashboard.js archive",
     "dashboard": "tsx scripts/launcher.ts",

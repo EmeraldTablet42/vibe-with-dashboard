@@ -88,6 +88,28 @@ const statusTone: Record<CardStatus, string> = {
   done: "bg-status-done/15",
 };
 
+const statusBadgeClass: Record<CardStatus, string> = {
+  backlog:
+    "border-zinc-500/70 bg-zinc-100 text-zinc-900 dark:border-zinc-400/60 dark:bg-zinc-700 dark:text-zinc-50",
+  ready:
+    "border-sky-600/70 bg-sky-100 text-sky-950 dark:border-sky-300/70 dark:bg-sky-500 dark:text-sky-950",
+  doing:
+    "border-amber-600/70 bg-amber-100 text-amber-950 dark:border-amber-300/70 dark:bg-amber-400 dark:text-amber-950",
+  review:
+    "border-violet-600/70 bg-violet-100 text-violet-950 dark:border-violet-300/70 dark:bg-violet-400 dark:text-violet-950",
+  done:
+    "border-emerald-700/70 bg-emerald-100 text-emerald-950 dark:border-emerald-300/70 dark:bg-emerald-400 dark:text-emerald-950",
+};
+
+const priorityBadgeClass: Record<CardPriority, string> = {
+  high:
+    "border-rose-600/70 bg-rose-100 text-rose-950 dark:border-rose-300/70 dark:bg-rose-400 dark:text-rose-950",
+  medium:
+    "border-orange-600/70 bg-orange-100 text-orange-950 dark:border-orange-300/70 dark:bg-orange-300 dark:text-orange-950",
+  low:
+    "border-teal-700/70 bg-teal-100 text-teal-950 dark:border-teal-300/70 dark:bg-teal-300 dark:text-teal-950",
+};
+
 type ArchiveRecord = DashboardSnapshot["archives"][number];
 type DuckSuggestion = DashboardSnapshot["duckSuggestions"][number];
 type ArchiveGoal = Omit<DashboardSnapshot["goals"][number], "milestones"> & {
@@ -145,6 +167,43 @@ function localizedText(
 ) {
   const translated = entity.translations?.[locale]?.[field];
   return translated?.trim() || fallback;
+}
+
+function StatusBadge({
+  messages,
+  status,
+}: {
+  messages: DashboardMessages;
+  status: CardStatus;
+}) {
+  return (
+    <Badge variant="outline" className={`font-semibold ${statusBadgeClass[status]}`}>
+      {messages.status[status]}
+    </Badge>
+  );
+}
+
+function PriorityBadge({
+  messages,
+  priority,
+}: {
+  messages: DashboardMessages;
+  priority: CardPriority;
+}) {
+  const label =
+    priority === "high"
+      ? messages.high
+      : priority === "medium"
+        ? messages.medium
+        : messages.low;
+  return (
+    <Badge
+      variant="outline"
+      className={`font-semibold ${priorityBadgeClass[priority]}`}
+    >
+      {label}
+    </Badge>
+  );
 }
 
 function normalizeArchiveGoals(snapshot: ArchivedSnapshot): DashboardSnapshot["goals"] {
@@ -771,7 +830,10 @@ function PlanTree({
                     </p>
                   )}
                 </div>
-                <Badge variant="outline">{milestone.priority}</Badge>
+                <PriorityBadge
+                  messages={messages}
+                  priority={milestone.priority as CardPriority}
+                />
               </div>
               <div className="mt-3 grid gap-2">
                 {milestone.cards.slice(0, 4).map((card) => (
@@ -783,9 +845,7 @@ function PlanTree({
                     <span className="min-w-0 flex-1 truncate text-[11px]">
                       {localizedText(card, locale, "title", card.title)}
                     </span>
-                    <Badge variant="secondary" className="text-[10px]">
-                      {messages.status[card.status as CardStatus] ?? card.status}
-                    </Badge>
+                    <StatusBadge messages={messages} status={card.status as CardStatus} />
                   </div>
                 ))}
               </div>
@@ -915,9 +975,13 @@ function KanbanMatrix({
           {messages.workflow}
         </div>
         <div className="grid grid-cols-3 gap-2 font-medium text-foreground">
-          <span>{messages.high}</span>
-          <span>{messages.medium}</span>
-          <span>{messages.low}</span>
+          {priorities.map((priority) => (
+            <PriorityBadge
+              key={priority}
+              messages={messages}
+              priority={priority}
+            />
+          ))}
         </div>
       </div>
 
@@ -956,12 +1020,12 @@ function KanbanRow({
     >
       <div className="flex flex-col justify-between rounded-md bg-background/70 p-2">
         <div>
-          <span className="text-xs font-semibold">{messages.status[status]}</span>
+          <StatusBadge messages={messages} status={status} />
           <p className="mt-1 text-[11px] text-muted-foreground">
             {messages.statusHint[status]}
           </p>
         </div>
-        <Badge variant="secondary" className="w-fit">
+        <Badge variant="outline" className={`w-fit ${statusBadgeClass[status]}`}>
           {cards.length}
         </Badge>
       </div>
@@ -1039,6 +1103,9 @@ function DraggableCard({
     <article
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform) }}
+      data-card-status={card.status}
+      data-card-title={card.title}
+      data-testid="kanban-card"
       className={`rounded-md border border-border bg-background p-2 shadow-sm ${
         isDragging ? "opacity-60" : ""
       }`}
@@ -1067,7 +1134,12 @@ function StaticCard({
   locale: SupportedLocale;
 }) {
   return (
-    <article className="rounded-md border border-border bg-background p-2 shadow-sm">
+    <article
+      data-card-status={card.status}
+      data-card-title={card.title}
+      data-testid="kanban-card"
+      className="rounded-md border border-border bg-background p-2 shadow-sm"
+    >
       <CardBody card={card} locale={locale} />
     </article>
   );

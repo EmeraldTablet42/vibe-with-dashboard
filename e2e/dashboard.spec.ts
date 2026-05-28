@@ -84,12 +84,25 @@ test("English monitoring shell loads with archive and folded panels", async ({
       ],
     },
   });
-  await page.reload();
 
   await expect(
     page.getByRole("heading", { name: "Implement onboarding" }).first()
   ).toBeVisible();
   await expect(page.getByRole("heading", { name: "Create screen" })).toBeVisible();
+  await expect(
+    page.locator('[data-testid="kanban-card"][data-card-title="Create screen"][data-card-status="ready"]')
+  ).toBeVisible();
+  await page.request.post("/api/agent/activity", {
+    data: {
+      phase: "implement",
+      title: "Screen in progress",
+      message: "The card moved without a page reload.",
+      cards: [{ title: "Create screen", status: "doing" }],
+    },
+  });
+  await expect(
+    page.locator('[data-testid="kanban-card"][data-card-title="Create screen"][data-card-status="doing"]')
+  ).toBeVisible();
   await expect(page.getByText("Ready", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("High", { exact: true }).first()).toBeVisible();
 

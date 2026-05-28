@@ -99,8 +99,9 @@ After install:
 
 ```bash
 node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js ensure
-node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js plan --task "Verify dashboard install"
+node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js plan --plan-json "{\"task\":\"Verify dashboard install\",\"title\":\"Verify dashboard install\",\"milestones\":[{\"title\":\"Smoke\",\"cards\":[{\"title\":\"Open dashboard\",\"status\":\"ready\",\"priority\":\"high\"}]}]}"
 node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js plan --task "Verify dashboard install" --translations '{"ko":{"title":"대시보드 설치 확인","task":"대시보드 설치 확인"}}'
+node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js card --card "Open dashboard" --status done
 node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js suggest --suggestion-json '{"keyword":"Verify","title":"Check the dashboard","actionPrompt":"Verify the Vibe with Dashboard install."}'
 node .vibe-with-dashboard/app/bin/vibe-with-dashboard.js activity --phase result --message "Install verified"
 ```
@@ -117,6 +118,8 @@ Expected:
 - `/api/health` returns `appId: "vibe-with-dashboard"`.
 - Plan sidebar shows the task.
 - Kanban shows at least one card.
+- Card status changes appear without reloading the dashboard.
+- Completed boards archive automatically after result activity when every card is done.
 - If the browser locale is Korean and the agent supplied Korean translations, Plan/Kanban items use those translated titles and summaries.
 - Rubber Duck appears at the bottom-right and can show agent-written suggestion keywords.
 - Activity sheet shows the result entry.
