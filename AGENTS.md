@@ -1,32 +1,36 @@
 <!-- BEGIN:nextjs-agent-rules -->
 # This is NOT the Next.js you know
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
+This version has breaking changes. Read the relevant guide in `node_modules/next/dist/docs/` before writing code when framework behavior is unclear.
 <!-- END:nextjs-agent-rules -->
 
 # My Project Dashboard
 
-This repo is a local, single-user, agent-driven dashboard for Codex work.
+Local, single-user monitoring dashboard for Codex work.
 
 ## Operating Rules
 
-- Keep the app local-first. Bind dashboard and MCP services to `127.0.0.1`.
-- Do not edit global Codex or Claude settings. Use project-local `.codex/`, `.agents/`, and repo files only.
-- Treat the dashboard as the control plane. Most file/code changes should be represented as a `Run` and executed by Codex, not by arbitrary dashboard shell commands.
-- Use risk-gated approvals: reads/tests are free, scoped edits are allowed by the Run, commits/pushes/deletes/external-cost actions require a decision.
-- Store progress as structured events. Do not persist private chain-of-thought or raw terminal dumps.
+- Use `$codex-dashboard` when the user wants project work reflected in the dashboard.
+- Before work, run `npm run dashboard:ensure`; do not ask the user to start the server manually.
+- Keep the web app monitoring-only: no prompt input, Run queue, Decision queue, heartbeat loop, or MCP sidecar.
+- Record phase-level activity with `npm run dashboard:activity`.
+- Do not store private reasoning, credentials, secrets, or long terminal dumps in activity entries.
+- Bind local services to `127.0.0.1`.
+- Do not edit global Codex or Claude settings.
 
 ## Dev Commands
 
-- `npm run dashboard`: start custom launcher, Next app, and MCP sidecar.
-- `npm run dev`: start only the Next app on `127.0.0.1:3000`.
-- `npm run mcp`: start only dashboard MCP on `127.0.0.1:3333/mcp`.
+- `npm run dashboard:ensure`: ensure dashboard is running, handle port conflicts, open browser.
+- `npm run dashboard`: start the dashboard launcher.
+- `npm run dashboard:activity -- --phase verify --message "..."`
 - `npm run verify`: lint, typecheck, and unit tests.
+- `npm run build`: Next production build.
+- `npm run e2e`: Playwright smoke test.
 
 ## Architecture
 
-- Next.js App Router UI with Korean 3-pane cockpit.
+- Next.js App Router UI with Plan, vertical Kanban, current processing rail, Activity sheet, and folded Inspector.
 - SQLite/Drizzle state in `.dashboard/dashboard.sqlite`.
 - SSE stream at `/api/events/stream`.
-- Streamable HTTP MCP sidecar at `http://127.0.0.1:3333/mcp`.
-- Repo skill at `.agents/skills/project-dashboard-agent/`.
+- Activity reporting at `/api/agent/activity`.
+- Repo-local skill at `.agents/skills/codex-dashboard/`.

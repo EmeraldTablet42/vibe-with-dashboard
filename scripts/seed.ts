@@ -6,10 +6,9 @@ console.log(
     {
       seeded: true,
       goals: summary.goals.length,
-      runs: summary.runs.length,
+      activities: summary.activities.length,
     },
     null,
     2
   )
 );
-

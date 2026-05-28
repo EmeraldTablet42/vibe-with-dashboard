@@ -32,7 +32,7 @@ export async function GET() {
       send({ kind: "snapshot", emittedAt: new Date().toISOString() });
       unsubscribe = subscribeDashboardEvents(send);
       interval = setInterval(() => {
-        send({ kind: "heartbeat", emittedAt: new Date().toISOString() });
+        send({ kind: "snapshot", emittedAt: new Date().toISOString() });
       }, 15_000);
     },
     cancel() {

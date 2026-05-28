@@ -1,16 +1,7 @@
-# Copy this file to `.codex/config.toml` for project-local Codex MCP.
-# Keep the real config local; `.codex/config.toml` is ignored by git.
-
-[mcp_servers.dashboard]
-url = "http://127.0.0.1:3333/mcp"
-enabled = true
-required = false
-startup_timeout_sec = 20
-tool_timeout_sec = 120
-default_tools_approval_mode = "approve"
+# Project-local Codex settings for this repository.
+# The dashboard no longer requires an MCP sidecar.
 
 [agents]
 max_threads = 4
 max_depth = 1
 job_max_runtime_seconds = 1800
-

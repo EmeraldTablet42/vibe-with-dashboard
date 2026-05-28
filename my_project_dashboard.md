@@ -1,77 +1,54 @@
-# My Project Dashboard Goal
-
-## Codex Goal Mode Contract
-
-This file is the goal document for Codex Goal mode. When the user starts Goal mode with `my_project_dashboard.md`, the active Codex session must become the long-running operator for the local project dashboard.
-
-The goal is not complete when the dashboard merely starts. The goal is complete only after the dashboard sends a shutdown signal and Codex has safely stopped the loop.
+# My Project Dashboard
 
 ## Mission
 
-Operate a local, single-user, Codex-first project dashboard that keeps planning, Runs, milestones, Kanban, Git/GitHub, design tokens, harness settings, and subagents in one real-time cockpit.
+This repo is a local monitoring dashboard for Codex-assisted project work.
 
-## Completion Condition
+The dashboard is not a command queue. Codex work starts in the Codex session. The web app shows current plan, vertical Kanban, activity timeline, repo/GitHub status, design tokens, harness files, skills, MCP config, and subagents.
 
-Do not mark this Goal complete until all conditions are true:
+## Skill Contract
 
-1. Dashboard shutdown has been requested through the dashboard UI or MCP `check_shutdown` returns `shutdownRequested: true`.
-2. No active Run is being executed, or the active Run has been completed/cancelled at a safe stopping point.
-3. Final progress has been reported to the dashboard.
-4. The heartbeat loop has stopped intentionally.
+Use repo-local skill:
 
-Idle state is not completion. If there is no Run, keep the Goal alive with adaptive heartbeat.
-
-## Bootstrap
-
-First action in Goal mode:
-
-```powershell
-npm run goal:bootstrap
+```text
+$codex-dashboard <user task>
 ```
 
-Never ask the user to start `npm run dashboard` manually. Bootstrap owns dependency check, project config copy, dashboard launcher start, and readiness wait.
+The skill must:
 
-After bootstrap:
+1. Run `npm run dashboard:ensure`.
+2. Reuse an existing healthy dashboard for this repo.
+3. If the default port is occupied by another app, pick the next available port without killing that app.
+4. Open the dashboard URL in the user's default browser.
+5. Record phase-level activity while doing the requested work.
 
-1. Ensure dashboard is reachable at `http://127.0.0.1:3000`.
-2. Ensure dashboard MCP is reachable as server `dashboard` at `http://127.0.0.1:3333/mcp`.
-3. Use the `project-dashboard-agent` skill.
-4. Start the dashboard heartbeat loop.
+## Activity Phases
 
-## Runtime Loop
+- `start`: task accepted and dashboard ready.
+- `plan`: context gathered and path chosen.
+- `implement`: meaningful project changes made.
+- `verify`: validation started or completed.
+- `result`: task completed.
+- `fail`: blocked or failed verification.
 
-Repeat until shutdown:
+Never store private reasoning, secrets, credentials, or long terminal dumps in dashboard activity.
 
-1. Call `heartbeat`.
-2. Call `check_shutdown`.
-3. If shutdown is requested, stop claiming new Runs and perform graceful shutdown.
-4. Call `poll_next_run`.
-5. If a Run exists, execute only that Run scope.
-6. Report progress with `report_progress` before and after meaningful phases.
-7. Use `request_decision` for commits, pushes, destructive changes, external-cost actions, or ambiguous product decisions.
-8. Finish the claimed Run with `complete_run`.
-9. If no Run exists, remain idle and keep heartbeat alive.
+## Commands
 
-## MCP Contract
+```powershell
+npm run dashboard:ensure
+npm run dashboard
+npm run dashboard:activity -- --phase implement --title "구현" --message "핵심 변경 완료"
+npm run verify
+npm run build
+npm run e2e
+```
 
-MCP endpoint: `http://127.0.0.1:3333/mcp`
+## Interfaces
 
-Tools:
+- Dashboard: `GET /api/dashboard/snapshot`
+- Health: `GET /api/health`
+- Agent activity: `POST /api/agent/activity`
+- Limited plan edits: `PATCH /api/goals/:id`, `PATCH /api/milestones/:id`, `PATCH /api/cards/:id`
 
-- `heartbeat`
-- `get_session_context`
-- `poll_next_run`
-- `report_progress`
-- `request_decision`
-- `complete_run`
-- `sync_plan_update`
-- `check_shutdown`
-
-## Boundaries
-
-- Do not change global Codex or Claude config.
-- Use project-local `.codex/`, `.agents/`, `AGENTS.md`, and this file for harness control.
-- Use GitHub through local `gh` auth.
-- Keep UI state in SQLite, not Markdown.
-- Preserve full structured Run/Event/Decision history.
-- Do not end the Codex Goal just because the dashboard is idle.
+No MCP sidecar, heartbeat loop, Run queue, Decision queue, or dashboard prompt input is required.

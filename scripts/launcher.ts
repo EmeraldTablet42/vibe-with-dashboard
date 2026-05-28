@@ -1,61 +1,70 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import path from "node:path";
 
-import { getSetting, upsertSetting } from "../src/lib/db/queries";
+import { addActivity, upsertSetting } from "../src/lib/db/queries";
 import { ensureSeedData } from "../src/lib/db/seed";
 
-type ManagedProcess = {
-  name: string;
-  child: ChildProcess;
-};
+const host = "127.0.0.1";
+const port = Number(process.env.DASHBOARD_PORT ?? process.env.PORT ?? 3000);
+const dashboardUrl = `http://${host}:${port}`;
+let child: ChildProcess | null = null;
 
-const children: ManagedProcess[] = [];
+function getNextCommand() {
+  return process.platform === "win32"
+    ? path.join(process.cwd(), "node_modules", ".bin", "next.cmd")
+    : path.join(process.cwd(), "node_modules", ".bin", "next");
+}
 
-function start(name: string, script: string) {
-  const command = process.platform === "win32" ? "cmd.exe" : "npm";
+function startNext() {
+  const command = process.platform === "win32" ? "cmd.exe" : getNextCommand();
   const args =
     process.platform === "win32"
-      ? ["/c", "npm", "run", script]
-      : ["run", script];
-  const child = spawn(command, args, {
+      ? [
+          "/c",
+          getNextCommand(),
+          "dev",
+          "--turbopack",
+          "--hostname",
+          host,
+          "--port",
+          String(port),
+        ]
+      : ["dev", "--turbopack", "--hostname", host, "--port", String(port)];
+
+  child = spawn(command, args, {
     cwd: process.cwd(),
-    env: process.env,
+    env: { ...process.env, DASHBOARD_PORT: String(port), PORT: String(port) },
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
   });
 
   child.stdout?.on("data", (chunk) => {
-    process.stdout.write(`[${name}] ${chunk}`);
+    process.stdout.write(`[next] ${chunk}`);
   });
   child.stderr?.on("data", (chunk) => {
-    process.stderr.write(`[${name}] ${chunk}`);
+    process.stderr.write(`[next] ${chunk}`);
   });
   child.on("exit", (code) => {
-    process.stdout.write(`[${name}] exited ${code}\n`);
+    process.stdout.write(`[next] exited ${code}\n`);
   });
-
-  children.push({ name, child });
 }
 
-function stopChild({ child, name }: ManagedProcess) {
-  if (child.killed || child.exitCode !== null) return;
-  console.log(`[launcher] stopping ${name}`);
-  child.kill("SIGINT");
-
-  setTimeout(() => {
-    if (child.killed || child.exitCode !== null) return;
-    if (process.platform === "win32") {
-      spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
-        windowsHide: true,
-      });
-    } else {
-      child.kill("SIGTERM");
-    }
-  }, 4_000).unref();
-}
-
-async function shutdown() {
+function stop() {
   upsertSetting("launcher_status", "stopping");
-  for (const child of children) stopChild(child);
+  if (child && !child.killed && child.exitCode === null) {
+    child.kill("SIGINT");
+    setTimeout(() => {
+      if (!child || child.killed || child.exitCode !== null) return;
+      if (process.platform === "win32") {
+        spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+          windowsHide: true,
+        });
+      } else {
+        child.kill("SIGTERM");
+      }
+    }, 4_000).unref();
+  }
+
   setTimeout(() => {
     upsertSetting("launcher_status", "stopped");
     process.exit(0);
@@ -63,26 +72,22 @@ async function shutdown() {
 }
 
 ensureSeedData();
-upsertSetting("shutdown_requested", "false");
-upsertSetting("launcher_status", "starting");
-
-start("next", "dev:next");
-start("mcp", "mcp");
-
+upsertSetting("dashboard_url", dashboardUrl);
+upsertSetting("dashboard_port", String(port));
 upsertSetting("launcher_status", "online");
-console.log("[launcher] dashboard http://127.0.0.1:3000");
-console.log("[launcher] mcp       http://127.0.0.1:3333/mcp");
+addActivity({
+  phase: "start",
+  source: "launcher",
+  status: "done",
+  task: "server",
+  title: "Dashboard server online",
+  message: dashboardUrl,
+  metadata: { port },
+});
 
-const interval = setInterval(() => {
-  if (getSetting("shutdown_requested", "false") === "true") {
-    clearInterval(interval);
-    shutdown();
-  }
-}, 1_000);
+startNext();
+console.log(`[launcher] dashboard ${dashboardUrl}`);
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.on(signal, () => {
-    clearInterval(interval);
-    shutdown();
-  });
+  process.on(signal, stop);
 }

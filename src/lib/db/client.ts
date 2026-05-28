@@ -6,6 +6,8 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 
 import * as schema from "@/lib/db/schema";
 
+const SCHEMA_VERSION = "monitoring-v1";
+
 type SqliteDatabase = Database.Database;
 type DrizzleDatabase = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -43,8 +45,52 @@ export function getDb() {
   return db;
 }
 
+function getExistingSchemaVersion() {
+  const settingsTable = getSqlite()
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'settings'"
+    )
+    .get();
+
+  if (!settingsTable) return null;
+
+  try {
+    const row = getSqlite()
+      .prepare("SELECT value FROM settings WHERE key = 'schema_version'")
+      .get() as { value?: string } | undefined;
+    return row?.value ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function resetLegacySchemaIfNeeded() {
+  const version = getExistingSchemaVersion();
+  if (version === SCHEMA_VERSION) return;
+
+  getSqlite().exec(`
+    PRAGMA foreign_keys = OFF;
+    DROP TABLE IF EXISTS decisions;
+    DROP TABLE IF EXISTS codex_sessions;
+    DROP TABLE IF EXISTS events;
+    DROP TABLE IF EXISTS runs;
+    DROP TABLE IF EXISTS activity_entries;
+    DROP TABLE IF EXISTS agent_checkpoints;
+    DROP TABLE IF EXISTS cards;
+    DROP TABLE IF EXISTS milestones;
+    DROP TABLE IF EXISTS goals;
+    DROP TABLE IF EXISTS design_tokens;
+    DROP TABLE IF EXISTS harness_profiles;
+    DROP TABLE IF EXISTS subagents;
+    DROP TABLE IF EXISTS settings;
+    PRAGMA foreign_keys = ON;
+  `);
+}
+
 export function initializeDatabase() {
   if (initialized) return;
+
+  resetLegacySchemaIfNeeded();
 
   getSqlite().exec(`
     CREATE TABLE IF NOT EXISTS goals (
@@ -52,6 +98,8 @@ export function initializeDatabase() {
       title TEXT NOT NULL,
       summary TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'active',
+      priority TEXT NOT NULL DEFAULT 'medium',
+      position INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -62,6 +110,7 @@ export function initializeDatabase() {
       title TEXT NOT NULL,
       summary TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'planned',
+      priority TEXT NOT NULL DEFAULT 'medium',
       due_date TEXT,
       position INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -76,49 +125,36 @@ export function initializeDatabase() {
       status TEXT NOT NULL DEFAULT 'backlog',
       priority TEXT NOT NULL DEFAULT 'medium',
       owner TEXT NOT NULL DEFAULT 'agent',
+      size TEXT NOT NULL DEFAULT 'M',
+      acceptance_criteria TEXT NOT NULL DEFAULT '',
+      verification_command TEXT NOT NULL DEFAULT '',
+      depends_on_json TEXT NOT NULL DEFAULT '[]',
       position INTEGER NOT NULL DEFAULT 0,
       github_issue_url TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    CREATE TABLE IF NOT EXISTS runs (
+    CREATE TABLE IF NOT EXISTS activity_entries (
       id TEXT PRIMARY KEY,
-      card_id TEXT REFERENCES cards(id),
-      title TEXT NOT NULL,
-      prompt TEXT NOT NULL,
-      mode TEXT NOT NULL DEFAULT 'standard',
-      status TEXT NOT NULL DEFAULT 'queued',
-      risk_level TEXT NOT NULL DEFAULT 'normal',
-      approval_policy TEXT NOT NULL DEFAULT 'risk_gated',
-      result TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-      started_at TEXT,
-      completed_at TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS events (
-      id TEXT PRIMARY KEY,
-      run_id TEXT REFERENCES runs(id),
-      type TEXT NOT NULL,
-      source TEXT NOT NULL DEFAULT 'dashboard',
-      severity TEXT NOT NULL DEFAULT 'info',
+      phase TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'codex',
+      status TEXT NOT NULL DEFAULT 'done',
+      task TEXT NOT NULL DEFAULT '',
       title TEXT NOT NULL,
       message TEXT NOT NULL,
-      payload_json TEXT NOT NULL DEFAULT '{}',
+      metadata_json TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    CREATE TABLE IF NOT EXISTS decisions (
+    CREATE TABLE IF NOT EXISTS agent_checkpoints (
       id TEXT PRIMARY KEY,
-      run_id TEXT REFERENCES runs(id),
-      title TEXT NOT NULL,
-      body TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'open',
-      options_json TEXT NOT NULL DEFAULT '[]',
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      resolved_at TEXT
+      agent TEXT NOT NULL DEFAULT 'codex',
+      task TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'active',
+      summary TEXT NOT NULL,
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS design_tokens (
@@ -155,16 +191,6 @@ export function initializeDatabase() {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    CREATE TABLE IF NOT EXISTS codex_sessions (
-      id TEXT PRIMARY KEY,
-      label TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'offline',
-      last_seen_at TEXT,
-      current_run_id TEXT REFERENCES runs(id),
-      heartbeat_interval_seconds INTEGER NOT NULL DEFAULT 30,
-      notes TEXT NOT NULL DEFAULT ''
-    );
-
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
@@ -174,13 +200,20 @@ export function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS milestones_goal_idx ON milestones(goal_id);
     CREATE INDEX IF NOT EXISTS cards_milestone_idx ON cards(milestone_id);
     CREATE INDEX IF NOT EXISTS cards_status_idx ON cards(status);
-    CREATE INDEX IF NOT EXISTS runs_card_idx ON runs(card_id);
-    CREATE INDEX IF NOT EXISTS runs_status_idx ON runs(status);
-    CREATE INDEX IF NOT EXISTS events_run_idx ON events(run_id);
-    CREATE INDEX IF NOT EXISTS events_created_idx ON events(created_at);
-    CREATE INDEX IF NOT EXISTS decisions_status_idx ON decisions(status);
+    CREATE INDEX IF NOT EXISTS cards_priority_idx ON cards(priority);
+    CREATE INDEX IF NOT EXISTS activity_created_idx ON activity_entries(created_at);
+    CREATE INDEX IF NOT EXISTS activity_phase_idx ON activity_entries(phase);
+    CREATE INDEX IF NOT EXISTS checkpoints_agent_idx ON agent_checkpoints(agent);
+    CREATE INDEX IF NOT EXISTS checkpoints_created_idx ON agent_checkpoints(created_at);
   `);
+
+  getSqlite()
+    .prepare(
+      `INSERT INTO settings (key, value, updated_at)
+       VALUES ('schema_version', @version, @updatedAt)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+    )
+    .run({ version: SCHEMA_VERSION, updatedAt: new Date().toISOString() });
 
   initialized = true;
 }
-

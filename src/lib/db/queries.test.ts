@@ -1,97 +1,85 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import {
-  completeRun,
-  createRun,
+  addActivity,
+  addAgentCheckpoint,
   getDashboardSnapshot,
   getSetting,
-  heartbeat,
-  moveCard,
-  pollNextRun,
-  reportProgress,
-  requestDecision,
-  requestShutdown,
+  updateCard,
+  updateGoal,
+  updateMilestone,
+  upsertSetting,
 } from "@/lib/db/queries";
 import { resetSeedDataForTests } from "@/lib/db/seed";
 
-describe("dashboard state machine", () => {
+describe("monitoring dashboard state", () => {
   beforeEach(() => {
     resetSeedDataForTests();
   });
 
-  it("creates a queued Run and lets Codex claim then complete it", async () => {
-    const run = createRun({
-      prompt: "테스트 Run을 수행해줘",
-      mode: "standard",
-      riskLevel: "low",
+  it("stores phase-level activity and agent checkpoints", async () => {
+    const activity = addActivity({
+      phase: "implement",
+      task: "test-task",
+      title: "구현 중",
+      message: "activity insert 확인",
+      metadata: { files: 2 },
     });
 
-    expect(run?.status).toBe("queued");
-
-    const claimed = pollNextRun("test-session");
-    expect(claimed.shutdownRequested).toBe(false);
-    expect(claimed.run?.id).toBe("run-first-handshake");
-    expect(claimed.run?.status).toBe("running");
-
-    const nextClaimed = pollNextRun("test-session");
-    expect(nextClaimed.run?.id).toBe(run?.id);
-
-    reportProgress({
-      runId: run?.id,
-      title: "검증 중",
-      message: "progress event",
-    });
-    const completed = completeRun({
-      runId: run!.id,
-      result: "done",
+    const checkpointId = addAgentCheckpoint({
+      agent: "codex",
+      task: "test-task",
+      status: "active",
+      summary: "checkpoint 확인",
+      payload: { phase: "implement" },
     });
 
-    expect(completed?.status).toBe("completed");
+    expect(activity?.id).toBeTruthy();
+    expect(checkpointId).toBeTruthy();
 
     const snapshot = await getDashboardSnapshot();
-    expect(snapshot.events.some((event) => event.title === "검증 중")).toBe(true);
-  });
-
-  it("moves approval-gated Runs into waiting_approval", async () => {
-    const run = createRun({
-      prompt: "commit 해도 되는지 확인해줘",
-      mode: "long",
-      riskLevel: "normal",
-    });
-
-    const decision = requestDecision({
-      runId: run?.id,
-      title: "커밋 승인",
-      body: "현재 변경사항을 커밋할까?",
-      options: ["approve", "reject"],
-    });
-
-    expect(decision.decisionId).toBeTruthy();
-
-    const snapshot = await getDashboardSnapshot();
-    expect(snapshot.runs.find((item) => item.id === run?.id)?.status).toBe(
-      "waiting_approval"
-    );
     expect(
-      snapshot.decisions.some((item) => item.id === decision.decisionId)
+      snapshot.activityEntries.some((entry) => entry.title === "구현 중")
+    ).toBe(true);
+    expect(
+      snapshot.agentCheckpoints.some(
+        (checkpoint) => checkpoint.summary === "checkpoint 확인"
+      )
     ).toBe(true);
   });
 
-  it("tracks card movement, heartbeat cadence, and shutdown flag", async () => {
-    moveCard("card-sse", "doing");
-    const activeHeartbeat = heartbeat({ sessionId: "test-session" });
-    expect(activeHeartbeat.heartbeatIntervalSeconds).toBe(5);
-
-    requestShutdown("test");
-    const stoppedHeartbeat = heartbeat({ sessionId: "test-session" });
-
-    expect(getSetting("shutdown_requested")).toBe("true");
-    expect(stoppedHeartbeat.shutdownRequested).toBe(true);
+  it("updates limited card, goal, and milestone fields", async () => {
+    updateCard("card-kanban-axis", {
+      status: "doing",
+      priority: "low",
+      position: 9,
+    });
+    updateGoal("goal-monitoring-dashboard", { status: "paused" });
+    updateMilestone("milestone-monitor", { status: "complete" });
 
     const snapshot = await getDashboardSnapshot();
-    expect(snapshot.cards.find((card) => card.id === "card-sse")?.status).toBe(
-      "doing"
+    const card = snapshot.cards.find((item) => item.id === "card-kanban-axis");
+    const goal = snapshot.goals.find(
+      (item) => item.id === "goal-monitoring-dashboard"
     );
+    const milestone = snapshot.goals
+      .flatMap((item) => item.milestones)
+      .find((item) => item.id === "milestone-monitor");
+
+    expect(card?.status).toBe("doing");
+    expect(card?.priority).toBe("low");
+    expect(goal?.status).toBe("paused");
+    expect(milestone?.status).toBe("complete");
+  });
+
+  it("exposes launch settings without Run or Decision state", async () => {
+    upsertSetting("dashboard_url", "http://127.0.0.1:3010");
+    expect(getSetting("dashboard_url")).toBe("http://127.0.0.1:3010");
+
+    const snapshot = await getDashboardSnapshot();
+    expect(snapshot.launch.command).toBe("$codex-dashboard <user task>");
+    expect(snapshot.launch.dashboardUrl).toBe("http://127.0.0.1:3010");
+    expect("runs" in snapshot).toBe(false);
+    expect("decisions" in snapshot).toBe(false);
   });
 });
-

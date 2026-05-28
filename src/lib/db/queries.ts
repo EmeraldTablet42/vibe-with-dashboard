@@ -1,26 +1,31 @@
 import { randomUUID } from "node:crypto";
 
-import { asc, desc, eq, inArray } from "drizzle-orm";
+import { asc, desc, eq } from "drizzle-orm";
 
 import { getDb, getSqlite, initializeDatabase } from "@/lib/db/client";
 import { ensureSeedData } from "@/lib/db/seed";
 import {
+  activityEntries,
+  agentCheckpoints,
   cards,
-  codexSessions,
-  decisions,
   designTokens,
-  events,
   goals,
   harnessProfiles,
   milestones,
-  runs,
   settings,
   subagents,
 } from "@/lib/db/schema";
 import { getProjectHarnessInventory } from "@/lib/harness/project";
 import { getGithubStatus, getRepoStatus, getWorkspaceFiles } from "@/lib/repo/git";
 import { publishDashboardEvent } from "@/lib/realtime/bus";
-import type { CardStatus, EventSeverity, RunMode, RunStatus } from "@/lib/types";
+import type {
+  ActivityPhase,
+  ActivityStatus,
+  CardPriority,
+  CardStatus,
+  GoalStatus,
+  MilestoneStatus,
+} from "@/lib/types";
 
 const now = () => new Date().toISOString();
 
@@ -32,8 +37,10 @@ function parseJson<T>(value: string, fallback: T): T {
   }
 }
 
-function makeRunTitle(prompt: string) {
-  return prompt.replace(/\s+/g, " ").trim().slice(0, 84) || "Untitled Run";
+function compactPatch<T extends Record<string, unknown>>(input: T) {
+  return Object.fromEntries(
+    Object.entries(input).filter(([, value]) => value !== undefined)
+  ) as Partial<T>;
 }
 
 export async function getDashboardSnapshot() {
@@ -44,35 +51,41 @@ export async function getDashboardSnapshot() {
     goalRows,
     milestoneRows,
     cardRows,
-    runRows,
-    eventRows,
-    decisionRows,
+    activityRows,
+    checkpointRows,
     tokenRows,
     harnessRows,
     subagentRows,
-    sessionRows,
     settingRows,
     repoStatus,
     githubStatus,
     workspaceFiles,
     harnessInventory,
   ] = await Promise.all([
-    Promise.resolve(db.select().from(goals).orderBy(asc(goals.createdAt)).all()),
+    Promise.resolve(db.select().from(goals).orderBy(asc(goals.position)).all()),
     Promise.resolve(
       db.select().from(milestones).orderBy(asc(milestones.position)).all()
     ),
     Promise.resolve(db.select().from(cards).orderBy(asc(cards.position)).all()),
-    Promise.resolve(db.select().from(runs).orderBy(desc(runs.createdAt)).limit(30).all()),
     Promise.resolve(
-      db.select().from(events).orderBy(desc(events.createdAt)).limit(80).all()
+      db
+        .select()
+        .from(activityEntries)
+        .orderBy(desc(activityEntries.createdAt))
+        .limit(80)
+        .all()
     ),
     Promise.resolve(
-      db.select().from(decisions).orderBy(desc(decisions.createdAt)).limit(20).all()
+      db
+        .select()
+        .from(agentCheckpoints)
+        .orderBy(desc(agentCheckpoints.createdAt))
+        .limit(20)
+        .all()
     ),
     Promise.resolve(db.select().from(designTokens).orderBy(asc(designTokens.name)).all()),
     Promise.resolve(db.select().from(harnessProfiles).orderBy(asc(harnessProfiles.name)).all()),
     Promise.resolve(db.select().from(subagents).orderBy(asc(subagents.name)).all()),
-    Promise.resolve(db.select().from(codexSessions).orderBy(desc(codexSessions.lastSeenAt)).all()),
     Promise.resolve(db.select().from(settings).all()),
     getRepoStatus(),
     getGithubStatus(),
@@ -84,26 +97,33 @@ export async function getDashboardSnapshot() {
     settingRows.map((setting) => [setting.key, setting.value])
   );
 
+  const cardsWithDependencies = cardRows.map((card) => ({
+    ...card,
+    dependsOn: parseJson<string[]>(card.dependsOnJson, []),
+  }));
+
   return {
     generatedAt: now(),
+    appId: "codex-dashboard",
     goals: goalRows.map((goal) => ({
       ...goal,
       milestones: milestoneRows
         .filter((milestone) => milestone.goalId === goal.id)
         .map((milestone) => ({
           ...milestone,
-          cards: cardRows.filter((card) => card.milestoneId === milestone.id),
+          cards: cardsWithDependencies.filter(
+            (card) => card.milestoneId === milestone.id
+          ),
         })),
     })),
-    cards: cardRows,
-    runs: runRows,
-    events: eventRows.map((event) => ({
-      ...event,
-      payload: parseJson(event.payloadJson, {}),
+    cards: cardsWithDependencies,
+    activityEntries: activityRows.map((activity) => ({
+      ...activity,
+      metadata: parseJson<Record<string, unknown>>(activity.metadataJson, {}),
     })),
-    decisions: decisionRows.map((decision) => ({
-      ...decision,
-      options: parseJson<string[]>(decision.optionsJson, []),
+    agentCheckpoints: checkpointRows.map((checkpoint) => ({
+      ...checkpoint,
+      payload: parseJson<Record<string, unknown>>(checkpoint.payloadJson, {}),
     })),
     designTokens: tokenRows,
     harnessProfiles: harnessRows.map((profile) => ({
@@ -115,129 +135,153 @@ export async function getDashboardSnapshot() {
       ...agent,
       tools: parseJson<string[]>(agent.toolsJson, []),
     })),
-    sessions: sessionRows,
     settings: settingsMap,
     repoStatus,
     githubStatus,
     workspaceFiles,
     harnessInventory,
     launch: {
-      dashboardUrl: "http://127.0.0.1:3000",
-      mcpUrl: settingsMap.mcp_url ?? "http://127.0.0.1:3333/mcp",
-      command: "Codex Goal mode에서 my_project_dashboard.md 실행",
+      dashboardUrl: settingsMap.dashboard_url ?? "http://127.0.0.1:3000",
+      command: "$codex-dashboard <user task>",
     },
   };
 }
 
-export function addEvent(input: {
-  runId?: string | null;
-  type: string;
+export function addActivity(input: {
+  phase: ActivityPhase;
   source?: string;
-  severity?: EventSeverity;
+  status?: ActivityStatus;
+  task?: string;
   title: string;
   message: string;
+  metadata?: unknown;
+}) {
+  ensureSeedData();
+  const id = randomUUID();
+  getDb()
+    .insert(activityEntries)
+    .values({
+      id,
+      phase: input.phase,
+      source: input.source ?? "codex",
+      status: input.status ?? "done",
+      task: input.task ?? "",
+      title: input.title,
+      message: input.message,
+      metadataJson: JSON.stringify(input.metadata ?? {}),
+      createdAt: now(),
+    })
+    .run();
+
+  publishDashboardEvent({ kind: "activity", id, message: input.title });
+  return getActivityById(id);
+}
+
+export function getActivityById(id: string) {
+  ensureSeedData();
+  const row = getDb()
+    .select()
+    .from(activityEntries)
+    .where(eq(activityEntries.id, id))
+    .get();
+
+  if (!row) return undefined;
+  return {
+    ...row,
+    metadata: parseJson<Record<string, unknown>>(row.metadataJson, {}),
+  };
+}
+
+export function addAgentCheckpoint(input: {
+  agent?: string;
+  task?: string;
+  status?: "active" | "idle" | "done" | "failed";
+  summary: string;
   payload?: unknown;
 }) {
   ensureSeedData();
   const id = randomUUID();
   getDb()
-    .insert(events)
+    .insert(agentCheckpoints)
     .values({
       id,
-      runId: input.runId ?? null,
-      type: input.type,
-      source: input.source ?? "dashboard",
-      severity: input.severity ?? "info",
-      title: input.title,
-      message: input.message,
+      agent: input.agent ?? "codex",
+      task: input.task ?? "",
+      status: input.status ?? "active",
+      summary: input.summary,
       payloadJson: JSON.stringify(input.payload ?? {}),
       createdAt: now(),
     })
     .run();
 
-  publishDashboardEvent({ kind: "event", id, message: input.title });
+  publishDashboardEvent({ kind: "checkpoint", id, message: input.summary });
   return id;
 }
 
-export function createRun(input: {
-  prompt: string;
-  mode?: RunMode;
-  cardId?: string | null;
-  title?: string;
-  riskLevel?: "low" | "normal" | "high";
-}) {
+export function updateCard(
+  cardId: string,
+  input: {
+    title?: string;
+    summary?: string;
+    status?: CardStatus;
+    priority?: CardPriority;
+    position?: number;
+  }
+) {
   ensureSeedData();
-  const id = randomUUID();
-  const title = input.title ?? makeRunTitle(input.prompt);
+  const patch = compactPatch({ ...input, updatedAt: now() });
+  getDb().update(cards).set(patch).where(eq(cards.id, cardId)).run();
 
-  getDb()
-    .insert(runs)
-    .values({
-      id,
-      cardId: input.cardId ?? null,
-      title,
-      prompt: input.prompt,
-      mode: input.mode ?? "standard",
-      status: "queued",
-      riskLevel: input.riskLevel ?? "normal",
-      approvalPolicy: "risk_gated",
-      createdAt: now(),
-      updatedAt: now(),
-    })
-    .run();
-
-  addEvent({
-    runId: id,
-    type: "run.created",
-    severity: "info",
-    title: "Run 생성",
-    message: title,
-    payload: { mode: input.mode ?? "standard", cardId: input.cardId ?? null },
+  addActivity({
+    phase: "implement",
+    source: "dashboard",
+    status: "done",
+    task: cardId,
+    title: "Card updated",
+    message: `${cardId} 상태가 갱신되었다.`,
+    metadata: input,
   });
-
-  publishDashboardEvent({ kind: "run", id, message: "Run queued" });
-  return getRunById(id);
+  publishDashboardEvent({ kind: "card", id: cardId, message: "updated" });
 }
 
-export function getRunById(id: string) {
+export function updateGoal(
+  goalId: string,
+  input: {
+    title?: string;
+    summary?: string;
+    status?: GoalStatus;
+    priority?: CardPriority;
+    position?: number;
+  }
+) {
   ensureSeedData();
-  return getDb().select().from(runs).where(eq(runs.id, id)).get();
+  const patch = compactPatch({ ...input, updatedAt: now() });
+  getDb().update(goals).set(patch).where(eq(goals.id, goalId)).run();
+  publishDashboardEvent({ kind: "goal", id: goalId, message: "updated" });
 }
 
-export function moveCard(cardId: string, status: CardStatus) {
+export function updateMilestone(
+  milestoneId: string,
+  input: {
+    title?: string;
+    summary?: string;
+    status?: MilestoneStatus;
+    priority?: CardPriority;
+    position?: number;
+  }
+) {
   ensureSeedData();
+  const patch = compactPatch({ ...input, updatedAt: now() });
   getDb()
-    .update(cards)
-    .set({ status, updatedAt: now() })
-    .where(eq(cards.id, cardId))
+    .update(milestones)
+    .set(patch)
+    .where(eq(milestones.id, milestoneId))
     .run();
-
-  addEvent({
-    type: "card.moved",
-    severity: "info",
-    title: "Card 이동",
-    message: `${cardId} -> ${status}`,
-    payload: { cardId, status },
+  publishDashboardEvent({
+    kind: "milestone",
+    id: milestoneId,
+    message: "updated",
   });
-  publishDashboardEvent({ kind: "card", id: cardId, message: status });
-}
-
-export function resolveDecision(id: string, status: "approved" | "rejected" | "resolved") {
-  ensureSeedData();
-  getDb()
-    .update(decisions)
-    .set({ status, resolvedAt: now() })
-    .where(eq(decisions.id, id))
-    .run();
-
-  addEvent({
-    type: "decision.resolved",
-    severity: status === "approved" ? "success" : "warning",
-    title: "Decision 처리",
-    message: `${id} -> ${status}`,
-    payload: { id, status },
-  });
-  publishDashboardEvent({ kind: "decision", id, message: status });
 }
 
 export function upsertSetting(key: string, value: string) {
@@ -255,223 +299,4 @@ export function getSetting(key: string, fallback = "") {
   initializeDatabase();
   const row = getDb().select().from(settings).where(eq(settings.key, key)).get();
   return row?.value ?? fallback;
-}
-
-export function requestShutdown(source = "dashboard") {
-  ensureSeedData();
-  upsertSetting("shutdown_requested", "true");
-  addEvent({
-    type: "system.shutdown_requested",
-    source,
-    severity: "warning",
-    title: "Graceful shutdown 요청",
-    message: "진행 중 Run은 안전 지점에서 정리 후 heartbeat를 종료한다.",
-  });
-  publishDashboardEvent({
-    kind: "shutdown",
-    message: "Graceful shutdown requested",
-  });
-}
-
-export function heartbeat(input: {
-  sessionId?: string;
-  label?: string;
-  currentRunId?: string | null;
-  notes?: string;
-}) {
-  ensureSeedData();
-  const id = input.sessionId || "local-codex";
-  const shutdownRequested = getSetting("shutdown_requested", "false") === "true";
-  const runningCount = getSqlite()
-    .prepare(
-      "SELECT COUNT(*) AS count FROM runs WHERE status IN ('queued', 'running', 'waiting_approval')"
-    )
-    .get() as { count: number };
-  const interval = runningCount.count > 0 ? 5 : 45;
-
-  getSqlite()
-    .prepare(
-      `INSERT INTO codex_sessions
-        (id, label, status, last_seen_at, current_run_id, heartbeat_interval_seconds, notes)
-       VALUES (@id, @label, @status, @lastSeenAt, @currentRunId, @interval, @notes)
-       ON CONFLICT(id) DO UPDATE SET
-        label = excluded.label,
-        status = excluded.status,
-        last_seen_at = excluded.last_seen_at,
-        current_run_id = excluded.current_run_id,
-        heartbeat_interval_seconds = excluded.heartbeat_interval_seconds,
-        notes = excluded.notes`
-    )
-    .run({
-      id,
-      label: input.label || "Local Codex Session",
-      status: shutdownRequested ? "stopping" : "online",
-      lastSeenAt: now(),
-      currentRunId: input.currentRunId ?? null,
-      interval,
-      notes: input.notes ?? "",
-    });
-
-  publishDashboardEvent({ kind: "heartbeat", id, message: "Codex heartbeat" });
-  return {
-    sessionId: id,
-    shutdownRequested,
-    heartbeatIntervalSeconds: interval,
-    pendingWork: runningCount.count,
-  };
-}
-
-export function pollNextRun(sessionId = "local-codex") {
-  ensureSeedData();
-  if (getSetting("shutdown_requested", "false") === "true") {
-    return { run: null, shutdownRequested: true };
-  }
-
-  const db = getDb();
-  const nextRun = db
-    .select()
-    .from(runs)
-    .where(inArray(runs.status, ["queued"]))
-    .orderBy(asc(runs.createdAt))
-    .get();
-
-  if (!nextRun) {
-    heartbeat({ sessionId });
-    return { run: null, shutdownRequested: false };
-  }
-
-  db.update(runs)
-    .set({ status: "running", startedAt: now(), updatedAt: now() })
-    .where(eq(runs.id, nextRun.id))
-    .run();
-
-  heartbeat({ sessionId, currentRunId: nextRun.id });
-  addEvent({
-    runId: nextRun.id,
-    type: "run.started",
-    source: "codex",
-    severity: "info",
-    title: "Run 시작",
-    message: nextRun.title,
-    payload: { sessionId },
-  });
-
-  return { run: getRunById(nextRun.id), shutdownRequested: false };
-}
-
-export function reportProgress(input: {
-  runId?: string | null;
-  type?: string;
-  severity?: EventSeverity;
-  title: string;
-  message: string;
-  payload?: unknown;
-}) {
-  ensureSeedData();
-  if (input.runId) {
-    getDb()
-      .update(runs)
-      .set({ updatedAt: now() })
-      .where(eq(runs.id, input.runId))
-      .run();
-  }
-
-  return addEvent({
-    runId: input.runId,
-    type: input.type ?? "run.progress",
-    source: "codex",
-    severity: input.severity ?? "info",
-    title: input.title,
-    message: input.message,
-    payload: input.payload,
-  });
-}
-
-export function requestDecision(input: {
-  runId?: string | null;
-  title: string;
-  body: string;
-  options?: string[];
-}) {
-  ensureSeedData();
-  const id = randomUUID();
-  getDb()
-    .insert(decisions)
-    .values({
-      id,
-      runId: input.runId ?? null,
-      title: input.title,
-      body: input.body,
-      status: "open",
-      optionsJson: JSON.stringify(input.options ?? ["approve", "reject"]),
-      createdAt: now(),
-    })
-    .run();
-
-  if (input.runId) {
-    getDb()
-      .update(runs)
-      .set({ status: "waiting_approval", updatedAt: now() })
-      .where(eq(runs.id, input.runId))
-      .run();
-  }
-
-  addEvent({
-    runId: input.runId,
-    type: "decision.requested",
-    source: "codex",
-    severity: "warning",
-    title: input.title,
-    message: input.body,
-    payload: { decisionId: id, options: input.options },
-  });
-  publishDashboardEvent({ kind: "decision", id, message: input.title });
-  return { decisionId: id };
-}
-
-export function completeRun(input: {
-  runId: string;
-  status?: Extract<RunStatus, "completed" | "failed" | "cancelled">;
-  result: string;
-}) {
-  ensureSeedData();
-  const status = input.status ?? "completed";
-  getDb()
-    .update(runs)
-    .set({
-      status,
-      result: input.result,
-      completedAt: now(),
-      updatedAt: now(),
-    })
-    .where(eq(runs.id, input.runId))
-    .run();
-
-  addEvent({
-    runId: input.runId,
-    type: `run.${status}`,
-    source: "codex",
-    severity: status === "completed" ? "success" : "error",
-    title: status === "completed" ? "Run 완료" : "Run 종료",
-    message: input.result,
-  });
-  publishDashboardEvent({ kind: "run", id: input.runId, message: status });
-  return getRunById(input.runId);
-}
-
-export function syncPlanUpdate(input: {
-  title: string;
-  message: string;
-  payload?: unknown;
-}) {
-  ensureSeedData();
-  const id = addEvent({
-    type: "plan.synced",
-    source: "codex",
-    severity: "success",
-    title: input.title,
-    message: input.message,
-    payload: input.payload,
-  });
-  return { eventId: id };
 }

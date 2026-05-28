@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Dashboard"
+  short_description: "Open dashboard and report progress."
+  default_prompt: "Use $codex-dashboard for this task."

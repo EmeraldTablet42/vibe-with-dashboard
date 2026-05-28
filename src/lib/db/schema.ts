@@ -6,6 +6,8 @@ export const goals = sqliteTable("goals", {
   title: text("title").notNull(),
   summary: text("summary").notNull(),
   status: text("status").notNull().default("active"),
+  priority: text("priority").notNull().default("medium"),
+  position: integer("position").notNull().default(0),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(datetime('now'))`),
@@ -24,6 +26,7 @@ export const milestones = sqliteTable(
     title: text("title").notNull(),
     summary: text("summary").notNull(),
     status: text("status").notNull().default("planned"),
+    priority: text("priority").notNull().default("medium"),
     dueDate: text("due_date"),
     position: integer("position").notNull().default(0),
     createdAt: text("created_at")
@@ -48,6 +51,10 @@ export const cards = sqliteTable(
     status: text("status").notNull().default("backlog"),
     priority: text("priority").notNull().default("medium"),
     owner: text("owner").notNull().default("agent"),
+    size: text("size").notNull().default("M"),
+    acceptanceCriteria: text("acceptance_criteria").notNull().default(""),
+    verificationCommand: text("verification_command").notNull().default(""),
+    dependsOnJson: text("depends_on_json").notNull().default("[]"),
     position: integer("position").notNull().default(0),
     githubIssueUrl: text("github_issue_url"),
     createdAt: text("created_at")
@@ -60,72 +67,48 @@ export const cards = sqliteTable(
   (table) => [
     index("cards_milestone_idx").on(table.milestoneId),
     index("cards_status_idx").on(table.status),
+    index("cards_priority_idx").on(table.priority),
   ]
 );
 
-export const runs = sqliteTable(
-  "runs",
+export const activityEntries = sqliteTable(
+  "activity_entries",
   {
     id: text("id").primaryKey(),
-    cardId: text("card_id").references(() => cards.id),
+    phase: text("phase").notNull(),
+    source: text("source").notNull().default("codex"),
+    status: text("status").notNull().default("done"),
+    task: text("task").notNull().default(""),
     title: text("title").notNull(),
-    prompt: text("prompt").notNull(),
-    mode: text("mode").notNull().default("standard"),
-    status: text("status").notNull().default("queued"),
-    riskLevel: text("risk_level").notNull().default("normal"),
-    approvalPolicy: text("approval_policy").notNull().default("risk_gated"),
-    result: text("result"),
+    message: text("message").notNull(),
+    metadataJson: text("metadata_json").notNull().default("{}"),
     createdAt: text("created_at")
       .notNull()
       .default(sql`(datetime('now'))`),
-    updatedAt: text("updated_at")
-      .notNull()
-      .default(sql`(datetime('now'))`),
-    startedAt: text("started_at"),
-    completedAt: text("completed_at"),
   },
   (table) => [
-    index("runs_card_idx").on(table.cardId),
-    index("runs_status_idx").on(table.status),
+    index("activity_created_idx").on(table.createdAt),
+    index("activity_phase_idx").on(table.phase),
   ]
 );
 
-export const events = sqliteTable(
-  "events",
+export const agentCheckpoints = sqliteTable(
+  "agent_checkpoints",
   {
     id: text("id").primaryKey(),
-    runId: text("run_id").references(() => runs.id),
-    type: text("type").notNull(),
-    source: text("source").notNull().default("dashboard"),
-    severity: text("severity").notNull().default("info"),
-    title: text("title").notNull(),
-    message: text("message").notNull(),
+    agent: text("agent").notNull().default("codex"),
+    task: text("task").notNull().default(""),
+    status: text("status").notNull().default("active"),
+    summary: text("summary").notNull(),
     payloadJson: text("payload_json").notNull().default("{}"),
     createdAt: text("created_at")
       .notNull()
       .default(sql`(datetime('now'))`),
   },
   (table) => [
-    index("events_run_idx").on(table.runId),
-    index("events_created_idx").on(table.createdAt),
+    index("checkpoints_agent_idx").on(table.agent),
+    index("checkpoints_created_idx").on(table.createdAt),
   ]
-);
-
-export const decisions = sqliteTable(
-  "decisions",
-  {
-    id: text("id").primaryKey(),
-    runId: text("run_id").references(() => runs.id),
-    title: text("title").notNull(),
-    body: text("body").notNull(),
-    status: text("status").notNull().default("open"),
-    optionsJson: text("options_json").notNull().default("[]"),
-    createdAt: text("created_at")
-      .notNull()
-      .default(sql`(datetime('now'))`),
-    resolvedAt: text("resolved_at"),
-  },
-  (table) => [index("decisions_status_idx").on(table.status)]
 );
 
 export const designTokens = sqliteTable("design_tokens", {
@@ -168,18 +151,6 @@ export const subagents = sqliteTable("subagents", {
     .default(sql`(datetime('now'))`),
 });
 
-export const codexSessions = sqliteTable("codex_sessions", {
-  id: text("id").primaryKey(),
-  label: text("label").notNull(),
-  status: text("status").notNull().default("offline"),
-  lastSeenAt: text("last_seen_at"),
-  currentRunId: text("current_run_id").references(() => runs.id),
-  heartbeatIntervalSeconds: integer("heartbeat_interval_seconds")
-    .notNull()
-    .default(30),
-  notes: text("notes").notNull().default(""),
-});
-
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
@@ -187,4 +158,3 @@ export const settings = sqliteTable("settings", {
     .notNull()
     .default(sql`(datetime('now'))`),
 });
-
