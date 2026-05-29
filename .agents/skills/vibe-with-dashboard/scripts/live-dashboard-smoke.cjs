@@ -33,6 +33,20 @@ function readStateUrl(projectRoot) {
   }
 }
 
+function defaultAppRoot() {
+  const scriptRoot = path.resolve(__dirname, "..");
+  const nestedAppRoot = path.join(scriptRoot, "assets", "dashboard-app");
+  if (fs.existsSync(path.join(nestedAppRoot, "package.json"))) {
+    return nestedAppRoot;
+  }
+  return scriptRoot;
+}
+
+function normalizePath(filePath = "") {
+  if (!filePath) return "";
+  return path.resolve(String(filePath)).toLowerCase();
+}
+
 async function readHealth(url) {
   const response = await fetch(new URL("/api/health", url));
   if (!response.ok) {
@@ -43,6 +57,23 @@ async function readHealth(url) {
     throw new Error(`unexpected appId: ${health.appId || "(missing)"}`);
   }
   return health;
+}
+
+function assertHealthTarget(health, projectRoot, appRoot) {
+  if (normalizePath(health.projectRoot) !== normalizePath(projectRoot)) {
+    throw new Error(
+      `projectRoot mismatch: expected ${projectRoot}, got ${health.projectRoot || "(missing)"}`
+    );
+  }
+
+  if (
+    health.appRoot &&
+    normalizePath(health.appRoot) !== normalizePath(appRoot)
+  ) {
+    throw new Error(
+      `appRoot mismatch: expected ${appRoot}, got ${health.appRoot}`
+    );
+  }
 }
 
 async function expectVisible(locator, label, timeout) {
@@ -62,12 +93,16 @@ async function visibleCount(locator) {
 async function main() {
   const flags = parseArgs(process.argv.slice(2));
   const projectRoot = path.resolve(String(flags.project || process.cwd()));
+  const appRoot = path.resolve(
+    String(flags["app-root"] || process.env.VIBE_DASHBOARD_APP_ROOT || defaultAppRoot())
+  );
   const timeout = Number(flags.timeout || DEFAULT_TIMEOUT);
   const url =
     String(flags.url || process.env.DASHBOARD_URL || readStateUrl(projectRoot)) ||
     "http://127.0.0.1:3000";
 
   const health = await readHealth(url);
+  assertHealthTarget(health, projectRoot, appRoot);
   const browser = await chromium.launch({ headless: !flags.headful });
   const page = await browser.newPage({
     locale: String(flags.locale || "en-US"),
@@ -107,6 +142,7 @@ async function main() {
       );
     }
 
+    const allowIdleDuck = Boolean(flags["allow-idle-duck"]);
     let chips = page.getByTestId("duck-suggestion-chip");
     if ((await visibleCount(chips)) === 0) {
       const minimized = page.getByTestId("rubber-duck-minimized");
@@ -121,17 +157,24 @@ async function main() {
       }
     }
 
-    await expectVisible(chips, "Rubber Duck suggestion chip", timeout);
-    const chipCount = await visibleCount(chips);
-    if (chipCount < 1 || chipCount > 5) {
-      throw new Error(`expected 1-5 Rubber Duck chips, got ${chipCount}`);
+    let chipCount = await visibleCount(chips);
+    if (chipCount === 0 && allowIdleDuck) {
+      await expectVisible(page.getByTestId("duck-idle-chip"), "Rubber Duck idle state", timeout);
+    } else {
+      await expectVisible(chips, "Rubber Duck suggestion chip", timeout);
+      chipCount = await visibleCount(chips);
+      if (chipCount < 1 || chipCount > 5) {
+        throw new Error(`expected 1-5 Rubber Duck chips, got ${chipCount}`);
+      }
     }
 
     const progress = await page
       .getByTestId("work-progress-bar")
       .getAttribute("data-work-progress");
     const focusText = (await focus.innerText()).replace(/\s+/g, " ").trim();
-    const chipLabels = (await chips.allInnerTexts()).map((text) => text.trim());
+    const chipLabels = chipCount > 0
+      ? (await chips.allInnerTexts()).map((text) => text.trim())
+      : ["(idle)"];
 
     if (flags["strict-console"] && consoleErrors.length > 0) {
       throw new Error(`browser console errors: ${consoleErrors.join(" | ")}`);

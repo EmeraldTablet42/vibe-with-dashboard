@@ -9,8 +9,18 @@ const { ensureRuntimeDependencies } = require("./runtime-deps.cjs");
 const projectRoot = path.resolve(
   process.env.VIBE_DASHBOARD_PROJECT_ROOT || process.cwd()
 );
+
+function defaultAppRoot() {
+  const scriptRoot = path.resolve(__dirname, "..");
+  const nestedAppRoot = path.join(scriptRoot, "assets", "dashboard-app");
+  if (fs.existsSync(path.join(nestedAppRoot, "package.json"))) {
+    return nestedAppRoot;
+  }
+  return scriptRoot;
+}
+
 const appRoot = path.resolve(
-  process.env.VIBE_DASHBOARD_APP_ROOT || path.join(__dirname, "..")
+  process.env.VIBE_DASHBOARD_APP_ROOT || defaultAppRoot()
 );
 const host = "127.0.0.1";
 const appId = "vibe-with-dashboard";
@@ -166,12 +176,12 @@ function isDashboardProcess(pid) {
     `(Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}").CommandLine`
   );
   const lower = commandLine.toLowerCase();
+  const app = appRoot.toLowerCase();
+  const legacyApp = path.join(projectRoot, ".vibe-with-dashboard", "app").toLowerCase();
   return (
-    (lower.includes(appRoot.toLowerCase()) ||
-      lower.includes(projectRoot.toLowerCase())) &&
-    (lower.includes("vibe-with-dashboard") ||
-      lower.includes(".vibe-with-dashboard") ||
-      lower.includes("dashboard"))
+    lower.includes(app) ||
+    lower.includes(legacyApp) ||
+    lower.includes(path.join(projectRoot, ".agents", "skills", "vibe-with-dashboard").toLowerCase())
   );
 }
 

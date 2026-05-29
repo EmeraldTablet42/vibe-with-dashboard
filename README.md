@@ -93,11 +93,11 @@ vibe-with-dashboard suggest --suggestion-json '{"keyword":"Docs","title":"Tighte
 Project-local fallback, always available after the one-line install:
 
 ```bash
-node .agents/skills/vibe-with-dashboard/bin/vibe-with-dashboard.js ensure
-node .agents/skills/vibe-with-dashboard/bin/vibe-with-dashboard.js plan --plan-json "{\"task\":\"Implement onboarding\",\"title\":\"Implement onboarding\",\"milestones\":[{\"title\":\"UI\",\"cards\":[{\"title\":\"Create screen\",\"status\":\"ready\",\"priority\":\"high\"}]}]}"
-node .agents/skills/vibe-with-dashboard/bin/vibe-with-dashboard.js card --card "Create screen" --status doing
-node .agents/skills/vibe-with-dashboard/bin/vibe-with-dashboard.js smoke
-node .agents/skills/vibe-with-dashboard/bin/vibe-with-dashboard.js activity --phase result --message "All cards complete" --card "Create screen" --card-status done
+node .agents/skills/vibe-with-dashboard/scripts/vibe-with-dashboard.js ensure
+node .agents/skills/vibe-with-dashboard/scripts/vibe-with-dashboard.js plan --plan-json "{\"task\":\"Implement onboarding\",\"title\":\"Implement onboarding\",\"milestones\":[{\"title\":\"UI\",\"cards\":[{\"title\":\"Create screen\",\"status\":\"ready\",\"priority\":\"high\"}]}]}"
+node .agents/skills/vibe-with-dashboard/scripts/vibe-with-dashboard.js card --card "Create screen" --status doing
+node .agents/skills/vibe-with-dashboard/scripts/vibe-with-dashboard.js smoke
+node .agents/skills/vibe-with-dashboard/scripts/vibe-with-dashboard.js activity --phase result --message "All cards complete" --card "Create screen" --card-status done
 ```
 
 ## What You Get
@@ -132,15 +132,15 @@ Full matrix and flags live in [INSTALL.md](./INSTALL.md).
 
 ## How It Works
 
-1. Installer writes the self-contained runtime into `.agents/skills/vibe-with-dashboard`.
-2. The skill folder becomes the dashboard app root, including CLI, Next app, scripts, package files, and public assets.
+1. Installer writes the Agent Skills folder into `.agents/skills/vibe-with-dashboard`.
+2. The dashboard app runtime lives under `.agents/skills/vibe-with-dashboard/assets/dashboard-app`, with package files, Next app, scripts, tests, and public assets.
 3. The skill tells your agent to start or reuse the local dashboard.
 4. The agent records task-level plan and activity events while it works.
 5. The agent can write 3-5 Rubber Duck suggestions for the active board.
 6. Completed boards can be archived, then the active board returns to empty.
 
-The runtime checks dependencies inside the installed skill folder. If the existing `node_modules` matches `package.json` and `package-lock.json`, it is reused; if it is missing or stale, the launcher runs `npm ci` there and falls back to `npm install`.
-On Windows and macOS, the dashboard launcher starts as a quiet background Node process so users do not see an extra terminal or console window.
+The runtime checks dependencies inside `assets/dashboard-app`. If the existing `node_modules` matches `package.json` and `package-lock.json`, it is reused; if it is missing or stale, the launcher runs `npm ci` there and falls back to `npm install`.
+On Windows, the dashboard launcher prefers `nodew.exe` and falls back to a hidden process wrapper; on macOS/Linux it uses detached redirected child processes. Normal startup does not open an extra terminal or console window.
 
 When an agent has a `<proposed_plan>`, it should convert that plan into `plan --plan-json` before implementation. Plan title becomes board/goal, major sections become milestones, execution bullets become cards, test bullets become verification cards, and assumptions remain as low-priority reference cards or milestone summary. Do not drop major items. Do not add visible cards for dashboard bookkeeping such as importing or syncing the plan; that contract is metadata.
 

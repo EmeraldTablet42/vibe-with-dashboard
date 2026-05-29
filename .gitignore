@@ -40,8 +40,12 @@ yarn-error.log*
 .vibe-with-dashboard/
 .agents/skills/vibe-with-dashboard/.next/
 .agents/skills/vibe-with-dashboard/node_modules/
+.agents/skills/vibe-with-dashboard/assets/dashboard-app/.next/
+.agents/skills/vibe-with-dashboard/assets/dashboard-app/node_modules/
 skills/vibe-with-dashboard/.next/
 skills/vibe-with-dashboard/node_modules/
+skills/vibe-with-dashboard/assets/dashboard-app/.next/
+skills/vibe-with-dashboard/assets/dashboard-app/node_modules/
 .codex/config.toml
 
 # vercel

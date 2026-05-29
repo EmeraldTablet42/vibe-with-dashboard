@@ -24,13 +24,17 @@ A concise phase-level record written by an LLM agent or launcher. Activity entri
 
 The data path for live progress: agent CLI command, dashboard REST API, SQLite state, SSE snapshot event, then React re-render. Progress updates do not require dashboard source-code edits.
 
-## Skill Runtime Root
+## Skill Root
 
-The installed skill folder that contains the executable dashboard runtime. For project-local installs this is `.agents/skills/vibe-with-dashboard`, including the CLI, Next app, scripts, package files, and public assets.
+The installed Agent Skills folder. For project-local installs this is `.agents/skills/vibe-with-dashboard`, with `SKILL.md`, `scripts/`, `references/`, `assets/`, and `agents/openai.yaml`.
+
+## Dashboard App Root
+
+The self-contained Next.js runtime under the skill root: `.agents/skills/vibe-with-dashboard/assets/dashboard-app`. It contains package files, app scripts, tests, source, and public assets.
 
 ## Dependency Check
 
-The startup check that validates Node, npm, required modules, package manifest hash, and local `node_modules` inside the Skill Runtime Root. Compatible dependencies are reused; missing or stale dependencies are installed in the Skill Runtime Root only.
+The startup check that validates Node, npm, required modules, package manifest hash, and local `node_modules` inside the Dashboard App Root. Compatible dependencies are reused; missing or stale dependencies are installed in `assets/dashboard-app` only.
 
 ## Inspector
 

@@ -30,7 +30,7 @@ The skill must:
 Progress updates are never source-code edits. They flow through CLI -> REST API -> SQLite -> SSE -> React re-render.
 Agents must move the board as they work: before each meaningful work unit, exactly one matching Work Card should become `doing`; after the unit, that card should become `done` or `review`. If no card matches, update the Plan before continuing. Rubber Duck suggestions are also agent-written; the agent should seed useful suggestions or explicitly clear them so the duck never looks broken because data was omitted.
 
-Project-local installs use `.agents/skills/vibe-with-dashboard` as the Skill Runtime Root. That folder contains the CLI, Next app, scripts, package files, and public assets. Startup checks dependencies there and reuses compatible `node_modules`; if dependencies are missing or stale, it installs them in the skill folder rather than the user project.
+Project-local installs use `.agents/skills/vibe-with-dashboard` as the Skill Root. The dashboard app runtime lives under `assets/dashboard-app`, with package files, the Next app, app scripts, tests, and public assets. Startup checks dependencies in `assets/dashboard-app` and reuses compatible `node_modules`; if dependencies are missing or stale, it installs them there rather than in the user project.
 
 When Plan Mode emits `<proposed_plan>`, convert it to `plan --plan-json` before implementation. The title becomes board/goal, major sections become milestones, execution bullets become cards, test bullets become verification cards, and assumptions become low-priority reference cards or milestone summary. No major execution item, test item, or assumption should be dropped. Dashboard bookkeeping such as importing, converting, or syncing the plan is metadata and should not appear as a visible Work Card.
 
@@ -90,4 +90,4 @@ Rubber Duck suggestions follow the same translation rule for keyword, title, sum
 
 ## Launcher
 
-`vibe-with-dashboard ensure` starts the dashboard from the Skill Runtime Root through `next dev` by default so monitored UI changes are visible immediately. On Windows and macOS it starts the launcher as a quiet background Node process, so no extra terminal or console window appears. The dashboard hides the Next.js on-screen dev indicator while leaving build/runtime errors available. Set `VIBE_DASHBOARD_PROD=1` only when intentionally running the dashboard in production mode.
+`vibe-with-dashboard ensure` starts the dashboard from `assets/dashboard-app` through `next dev` by default so monitored UI changes are visible immediately. Windows startup prefers `nodew.exe` and falls back to a hidden process wrapper; macOS/Linux use detached redirected child processes. Normal startup does not open an extra terminal or console window. The dashboard hides the Next.js on-screen dev indicator while leaving build/runtime errors available. Set `VIBE_DASHBOARD_PROD=1` only when intentionally running the dashboard in production mode.

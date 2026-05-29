@@ -26,8 +26,8 @@ npx -y github:EmeraldTablet42/vibe-with-dashboard
 
 What it does:
 
-- Installs the self-contained dashboard runtime into `.agents/skills/vibe-with-dashboard`.
-- Uses that skill folder as the dashboard app root, including CLI, Next app, scripts, package files, and public assets.
+- Installs the Agent Skills folder into `.agents/skills/vibe-with-dashboard`.
+- Uses `assets/dashboard-app` inside that skill folder as the dashboard app root, including the Next app, scripts, package files, tests, and public assets.
 - Adds a small marker block to `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md`.
 - Leaves global agent settings alone unless `--global`, `--all`, or `--only <agent>` is passed.
 - Skips unrelated services and never kills a process just because it owns port `3000`.
@@ -99,19 +99,19 @@ Useful flags:
 After install:
 
 ```bash
-node .agents/skills/vibe-with-dashboard/bin/vibe-with-dashboard.js ensure
-node .agents/skills/vibe-with-dashboard/bin/vibe-with-dashboard.js plan --plan-json "{\"task\":\"Verify dashboard install\",\"title\":\"Verify dashboard install\",\"milestones\":[{\"title\":\"Smoke\",\"cards\":[{\"title\":\"Open dashboard\",\"status\":\"ready\",\"priority\":\"high\"}]}]}"
-node .agents/skills/vibe-with-dashboard/bin/vibe-with-dashboard.js plan --task "Verify dashboard install" --translations '{"ko":{"title":"대시보드 설치 확인","task":"대시보드 설치 확인"}}'
-node .agents/skills/vibe-with-dashboard/bin/vibe-with-dashboard.js card --card "Open dashboard" --status doing
-node .agents/skills/vibe-with-dashboard/bin/vibe-with-dashboard.js suggest --suggestion-json '{"keyword":"Verify","title":"Check the dashboard","actionPrompt":"Verify the Vibe with Dashboard install."}'
-node .agents/skills/vibe-with-dashboard/bin/vibe-with-dashboard.js smoke
-node .agents/skills/vibe-with-dashboard/bin/vibe-with-dashboard.js activity --phase result --message "Install verified" --card "Open dashboard" --card-status done
+node .agents/skills/vibe-with-dashboard/scripts/vibe-with-dashboard.js ensure
+node .agents/skills/vibe-with-dashboard/scripts/vibe-with-dashboard.js plan --plan-json "{\"task\":\"Verify dashboard install\",\"title\":\"Verify dashboard install\",\"milestones\":[{\"title\":\"Smoke\",\"cards\":[{\"title\":\"Open dashboard\",\"status\":\"ready\",\"priority\":\"high\"}]}]}"
+node .agents/skills/vibe-with-dashboard/scripts/vibe-with-dashboard.js plan --task "Verify dashboard install" --translations '{"ko":{"title":"대시보드 설치 확인","task":"대시보드 설치 확인"}}'
+node .agents/skills/vibe-with-dashboard/scripts/vibe-with-dashboard.js card --card "Open dashboard" --status doing
+node .agents/skills/vibe-with-dashboard/scripts/vibe-with-dashboard.js suggest --suggestion-json '{"keyword":"Verify","title":"Check the dashboard","actionPrompt":"Verify the Vibe with Dashboard install."}'
+node .agents/skills/vibe-with-dashboard/scripts/vibe-with-dashboard.js smoke
+node .agents/skills/vibe-with-dashboard/scripts/vibe-with-dashboard.js activity --phase result --message "Install verified" --card "Open dashboard" --card-status done
 ```
 
 Rubber Duck suggestion-json example:
 
 ```bash
-node .agents/skills/vibe-with-dashboard/bin/vibe-with-dashboard.js suggest --suggestion-json '{"keyword":"Docs","title":"Tighten setup docs","summary":"Clarify the install path.","detail":"The README should show the shortest project-local install and verify flow.","actionPrompt":"Review README.md and INSTALL.md for any unclear setup steps.","priority":"medium"}'
+node .agents/skills/vibe-with-dashboard/scripts/vibe-with-dashboard.js suggest --suggestion-json '{"keyword":"Docs","title":"Tighten setup docs","summary":"Clarify the install path.","detail":"The README should show the shortest project-local install and verify flow.","actionPrompt":"Review README.md and INSTALL.md for any unclear setup steps.","priority":"medium"}'
 ```
 
 Expected:
@@ -161,7 +161,7 @@ Skills installed through `npx skills add` are owned by the Skills CLI or the hos
 Run:
 
 ```bash
-node .agents/skills/vibe-with-dashboard/bin/vibe-with-dashboard.js ensure
+node .agents/skills/vibe-with-dashboard/scripts/vibe-with-dashboard.js ensure
 ```
 
 The launcher reuses the same dashboard when `/api/health` matches this project. If another app owns `3000`, it picks the next open port without killing that app.
@@ -179,7 +179,7 @@ npx -y github:EmeraldTablet42/vibe-with-dashboard
 Use the project-local command:
 
 ```bash
-node .agents/skills/vibe-with-dashboard/bin/vibe-with-dashboard.js ensure
+node .agents/skills/vibe-with-dashboard/scripts/vibe-with-dashboard.js ensure
 ```
 
 **Install touched files I care about.**

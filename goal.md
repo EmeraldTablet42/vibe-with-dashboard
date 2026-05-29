@@ -282,7 +282,7 @@ npm run runtime:check
 npm run verify
 npm run build
 npm run e2e
-node .agents/skills/vibe-with-dashboard/bin/vibe-with-dashboard.js smoke
+node .agents/skills/vibe-with-dashboard/scripts/vibe-with-dashboard.js smoke
 ```
 
 Also run a fresh install smoke for all three sample project types one final time.

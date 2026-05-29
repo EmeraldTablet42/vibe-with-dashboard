@@ -1,0 +1,8 @@
+interface:
+  display_name: "Vibe with Dashboard"
+  short_description: "Monitor agent work in a local Plan, Kanban, Activity, and Rubber Duck dashboard."
+  icon_large: "./assets/rubber-duck/rubber-duck-2d5.png"
+  brand_color: "#0EA5E9"
+  default_prompt: "$vibe-with-dashboard "
+policy:
+  allow_implicit_invocation: true

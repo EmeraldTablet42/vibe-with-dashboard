@@ -11,7 +11,7 @@ Local, single-user monitoring dashboard for LLM agent work.
 ## Operating Rules
 
 - Use `$vibe-with-dashboard` when the user wants project work reflected in the dashboard.
-- Before monitored work, run `vibe-with-dashboard ensure` or `node .agents/skills/vibe-with-dashboard/bin/vibe-with-dashboard.js ensure`; do not ask the user to start the server manually.
+- Before monitored work, run `vibe-with-dashboard ensure` or `node .agents/skills/vibe-with-dashboard/scripts/vibe-with-dashboard.js ensure`; do not ask the user to start the server manually.
 - Keep the web app monitoring-only: no prompt input or agent command queue.
 - Record phase-level activity with `vibe-with-dashboard activity`.
 - Use `vibe-with-dashboard plan --plan-json "{...}"` for real work plans so milestones/cards are preserved. Use `--task` only for tiny work.
@@ -58,5 +58,5 @@ Local, single-user monitoring dashboard for LLM agent work.
 - Plan reporting at `/api/agent/plan`.
 - Archive endpoint at `/api/dashboard/archive`.
 - Canonical skill at `skills/vibe-with-dashboard/`, repo-local mirror at `.agents/skills/vibe-with-dashboard/`.
-- Installed skill folders are self-contained runtime roots: CLI, Next app, scripts, package files, and public assets live under the skill folder.
-- Runtime dependency checks happen inside the skill root and never use the target project's own dependency tree.
+- Installed skill folders contain Agent Skills files; dashboard runtime lives under `assets/dashboard-app/`.
+- Runtime dependency checks happen inside `assets/dashboard-app/` and never use the target project's own dependency tree.
