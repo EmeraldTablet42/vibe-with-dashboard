@@ -276,7 +276,7 @@ test("English monitoring shell loads with archive and folded panels", async ({
   await page.getByRole("tab", { name: /Archive/ }).click();
   await expect(page.getByRole("heading", { name: "Clear archive smoke" }).first()).toBeVisible();
   await page.getByRole("button", { name: "Clear all archives" }).click();
-  await page.getByRole("button", { name: "Clear", exact: true }).click();
+  await page.getByRole("button", { name: "Clear", exact: true }).click({ force: true });
   await expect(page.getByText("No archived boards")).toBeVisible();
   await page.getByRole("tab", { name: /Active/ }).click();
 

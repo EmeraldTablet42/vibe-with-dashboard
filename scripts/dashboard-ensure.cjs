@@ -249,16 +249,97 @@ function resolveFromAppRoot(specifier) {
   return require.resolve(specifier, { paths: [appRoot] });
 }
 
+function backgroundNodeCommand() {
+  if (process.env.VIBE_DASHBOARD_VISIBLE_CONSOLE === "1") {
+    return process.execPath;
+  }
+
+  if (process.platform !== "win32") {
+    return process.execPath;
+  }
+
+  const nodewPath = path.join(path.dirname(process.execPath), "nodew.exe");
+  return exists(nodewPath) ? nodewPath : process.execPath;
+}
+
+function shouldDetachLauncher(command) {
+  if (process.platform !== "win32") return true;
+  return path.basename(command).toLowerCase() === "nodew.exe";
+}
+
+function quoteCmd(value) {
+  return `"${String(value).replace(/"/g, '""')}"`;
+}
+
+function quotePowerShell(value) {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+function writeHiddenWindowsLauncherScript(port, args, outPath, errPath) {
+  const scriptPath = path.join(stateDir, "start-launcher.cmd");
+  const lines = [
+    "@echo off",
+    `set "DASHBOARD_PORT=${port}"`,
+    `set "PORT=${port}"`,
+    `set "VIBE_DASHBOARD_APP_ROOT=${appRoot}"`,
+    `set "VIBE_DASHBOARD_PROJECT_ROOT=${projectRoot}"`,
+    `cd /d ${quoteCmd(appRoot)}`,
+    `${quoteCmd(process.execPath)} ${args.map(quoteCmd).join(" ")} 1>>${quoteCmd(outPath)} 2>>${quoteCmd(errPath)}`,
+  ];
+  fs.writeFileSync(scriptPath, `${lines.join("\r\n")}\r\n`);
+  return scriptPath;
+}
+
+function startLauncherWithHiddenWindowsProcess(port, args, outPath, errPath) {
+  const scriptPath = writeHiddenWindowsLauncherScript(port, args, outPath, errPath);
+  const commandLine = `cmd.exe /d /s /c ${quoteCmd(scriptPath)}`;
+  const script = [
+    "$startup = ([WMIClass]'Win32_ProcessStartup').CreateInstance()",
+    "$startup.ShowWindow = 0",
+    `$result = ([WMIClass]'Win32_Process').Create(${quotePowerShell(commandLine)}, ${quotePowerShell(appRoot)}, $startup)`,
+    "if ($result.ReturnValue -ne 0) { throw \"Win32_Process.Create failed with code $($result.ReturnValue)\" }",
+    "$result.ProcessId",
+  ].join("; ");
+
+  const result = spawnSync(
+    "powershell.exe",
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-Command", script],
+    { cwd: projectRoot, encoding: "utf8", windowsHide: true }
+  );
+
+  if (result.status !== 0) {
+    const details = `${result.stdout || ""}${result.stderr || ""}`.trim();
+    throw new Error(`failed to start hidden launcher${details ? `: ${details}` : ""}`);
+  }
+
+  const pid = Number(String(result.stdout || "").trim().split(/\s+/).at(-1));
+  if (!Number.isFinite(pid) || pid <= 0) {
+    throw new Error("hidden launcher did not return a process id");
+  }
+
+  return pid;
+}
+
 function startLauncher(port) {
   ensureDir(stateDir);
-  const out = fs.openSync(path.join(stateDir, "launcher.out.log"), "a");
-  const err = fs.openSync(path.join(stateDir, "launcher.err.log"), "a");
-  const command = process.execPath;
+  const outPath = path.join(stateDir, "launcher.out.log");
+  const errPath = path.join(stateDir, "launcher.err.log");
+  const command = backgroundNodeCommand();
   const args = [resolveFromAppRoot("tsx/cli"), path.join(appRoot, "scripts", "launcher.ts")];
+
+  if (process.platform === "win32" && !shouldDetachLauncher(command)) {
+    const pid = startLauncherWithHiddenWindowsProcess(port, args, outPath, errPath);
+    fs.writeFileSync(path.join(stateDir, "launcher.pid"), String(pid));
+    log(`started hidden launcher pid=${pid} port=${port}`);
+    return pid;
+  }
+
+  const out = fs.openSync(outPath, "a");
+  const err = fs.openSync(errPath, "a");
 
   const child = spawn(command, args, {
     cwd: appRoot,
-    detached: true,
+    detached: shouldDetachLauncher(command),
     env: {
       ...process.env,
       DASHBOARD_PORT: String(port),

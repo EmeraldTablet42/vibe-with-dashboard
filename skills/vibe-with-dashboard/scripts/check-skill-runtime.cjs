@@ -118,6 +118,39 @@ for (const target of TARGETS) {
       failures.push(`${path.relative(ROOT, target)} is out of sync for SKILL.md`);
     }
   }
+
+  const ensureScript = fs.readFileSync(
+    path.join(target, "scripts", "dashboard-ensure.cjs"),
+    "utf8"
+  );
+  if (!ensureScript.includes("nodew.exe")) {
+    failures.push(
+      `${path.relative(ROOT, target)} dashboard ensure does not prefer nodew.exe for quiet Windows launch`
+    );
+  }
+  if (!ensureScript.includes("VIBE_DASHBOARD_VISIBLE_CONSOLE")) {
+    failures.push(
+      `${path.relative(ROOT, target)} dashboard ensure is missing the explicit visible-console debug escape hatch`
+    );
+  }
+  if (!ensureScript.includes("shouldDetachLauncher(command)")) {
+    failures.push(
+      `${path.relative(ROOT, target)} dashboard ensure does not guard Windows node.exe against detached console windows`
+    );
+  }
+  if (!ensureScript.includes("startLauncherWithHiddenWindowsProcess")) {
+    failures.push(
+      `${path.relative(ROOT, target)} dashboard ensure is missing the hidden Windows launch fallback for Windows without nodew.exe`
+    );
+  }
+  if (
+    !ensureScript.includes("-WindowStyle") ||
+    !ensureScript.includes("ShowWindow = 0")
+  ) {
+    failures.push(
+      `${path.relative(ROOT, target)} dashboard ensure is missing hidden window flags for Windows background launch`
+    );
+  }
 }
 
 if (failures.length > 0) {
